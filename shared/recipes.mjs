@@ -6,6 +6,8 @@
 //              or  |3w  (count 3 pressure-cooker whistles).
 // spice: 1 = mild, 2 = medium, 3 = hot.  time = total minutes.
 
+import { MORE_RECIPES } from './recipes-more.mjs';
+
 export const RECIPES = [
   // ---------- Breakfast ----------
   {
@@ -667,4 +669,5 @@ export const RECIPES = [
       'Drink right away.',
     ],
   },
+  ...MORE_RECIPES,
 ];

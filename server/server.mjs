@@ -7,6 +7,7 @@ import { join, normalize, extname, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { suggest, parseIngredients, chatReply, findRescue } from '../shared/engine.mjs';
 import { inventRecipe, scanPhoto, aiConfig } from './ai.mjs';
+import { accountRoutes, liveCatalog, recordAiCall, currentUser } from './accounts.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = join(ROOT, 'dist');
@@ -57,28 +58,34 @@ async function handleApi(req, res, path) {
   if (req.method === 'GET' && path === '/api/health') {
     return send(res, 200, { ok: true, ai: !!aiConfig().key, version: '1.0.0' });
   }
+  const result = await accountRoutes(req, res, path, readBody);
+  if (result !== undefined) return send(res, 200, result);
   if (req.method !== 'POST') return send(res, 405, { error: 'Use POST' });
   const body = await readBody(req, path === '/api/ai/scan' ? 8 * 1024 * 1024 : 200 * 1024);
+  const visitor = () => currentUser(req)?.id || ip;
+  const catalog = liveCatalog();
 
   switch (path) {
     case '/api/parse':
       return send(res, 200, parseIngredients(String(body.text || '')));
     case '/api/suggest': {
       const pantry = Array.isArray(body.pantry) ? body.pantry.map(p => (typeof p === 'string' ? { id: p } : p)) : [];
-      const { ready, almost } = suggest({ pantry, members: body.members || [], filters: body.filters || {} });
+      const { ready, almost } = suggest({ pantry, members: body.members || [], filters: body.filters || {}, extraRecipes: catalog.recipes, hidden: catalog.hidden });
       const slim = r => ({ id: r.recipe.id, name: r.recipe.name, time: r.recipe.time, missing: r.missing, usesSoon: r.usesSoon, notes: r.notes });
       return send(res, 200, { ready: ready.map(slim), almost: almost.map(slim) });
     }
     case '/api/chat':
       // The same brain a WhatsApp bot would use: text in, short reply out.
-      return send(res, 200, chatReply(String(body.text || '').slice(0, 1000)));
+      return send(res, 200, chatReply(String(body.text || '').slice(0, 1000), { extraRecipes: catalog.recipes, hidden: catalog.hidden }));
     case '/api/rescue':
       return send(res, 200, findRescue(String(body.text || '')));
     case '/api/ai/invent':
-      if (rateLimited(ip)) return send(res, 429, { error: 'Too many AI requests. Please wait a minute.' });
+      if (rateLimited(visitor())) return send(res, 429, { error: 'Too many AI requests. Please wait a minute.' });
+      recordAiCall(visitor());
       return send(res, 200, { recipe: await inventRecipe(body) });
     case '/api/ai/scan': {
-      if (rateLimited(ip)) return send(res, 429, { error: 'Too many AI requests. Please wait a minute.' });
+      if (rateLimited(visitor())) return send(res, 429, { error: 'Too many AI requests. Please wait a minute.' });
+      recordAiCall(visitor());
       const names = await scanPhoto(body);
       const parsed = parseIngredients(names.join(', '));
       return send(res, 200, { names, found: parsed.found, unknown: parsed.unknown });
@@ -90,6 +97,7 @@ async function handleApi(req, res, path) {
 
 async function serveFile(res, urlPath) {
   let rel = decodeURIComponent(urlPath.split('?')[0]);
+  if (rel === '/admin' || rel === '/admin/') rel = '/admin.html';
   if (rel.endsWith('/')) rel += 'index.html';
   const file = normalize(join(DIST, rel));
   if (file !== DIST && !file.startsWith(DIST + sep)) return send(res, 403, 'Forbidden'); // blocks ../../ tricks
@@ -117,14 +125,20 @@ export function createServer() {
     const url = new URL(req.url, 'http://x');
     res.setHeader('x-content-type-options', 'nosniff');
     res.setHeader('referrer-policy', 'same-origin');
+    res.setHeader('content-security-policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
     try {
-      if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url.pathname);
+      if (url.pathname.startsWith('/api/')) {
+        // Browsers always say where a POST came from, so block other sites acting as a signed-in user.
+        const origin = req.headers.origin;
+        if (req.method !== 'GET' && origin && origin.replace(/^https?:\/\//, '') !== req.headers.host) return send(res, 403, { error: 'Cross-site request blocked.' });
+        return await handleApi(req, res, url.pathname);
+      }
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed');
       return await serveFile(res, url.pathname);
     } catch (err) {
       const status = err.status || 500;
       if (status >= 500) console.error('[ballava]', err.message);
-      if (!res.headersSent) send(res, status, { error: status >= 500 && !err.status ? 'Something went wrong on the server.' : err.message });
+      if (!res.headersSent) send(res, status, err.payload || { error: status >= 500 && !err.status ? 'Something went wrong on the server.' : err.message });
     }
   });
 }
@@ -132,7 +146,16 @@ export function createServer() {
 // Start only when run directly (tests import createServer instead).
 if (process.argv[1] && fileURLToPath(import.meta.url) === normalize(process.argv[1])) {
   const port = Number(process.env.PORT || 3000);
-  createServer().listen(port, () => {
+  const server = createServer();
+  server.on('error', err => {
+    if (err.code !== 'EADDRINUSE') throw err;
+    console.error(`\n  Port ${port} is already in use, so Ballava could not start.`);
+    console.error(`  Ballava may already be running: try  http://localhost:${port}  in your browser.`);
+    console.error('  To restart it, press Ctrl+C in the other terminal window, then run  npm start  again.');
+    console.error('  Or use another port: add  PORT=4000  to your .env file.\n');
+    process.exit(1);
+  });
+  server.listen(port, () => {
     console.log(`\n  Ballava is running!  Open  http://localhost:${port}  in your browser.`);
     console.log(`  AI Chef: ${aiConfig().key ? 'ON' : 'off (add ANTHROPIC_API_KEY to .env to switch it on)'}`);
     console.log('  Press Ctrl+C to stop.\n');

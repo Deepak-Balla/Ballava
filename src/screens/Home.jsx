@@ -1,6 +1,8 @@
 import React, { useMemo } from 'react';
 import { suggest, buyTips, useSoon, daysLeft, defaultExpiry } from '../../shared/engine.mjs';
+import { repeatCheck, goalScore, prepTonight, dayKey, SLOTS, SLOT_LABEL } from '../../shared/planner.mjs';
 import { go } from '../lib.js';
+import { t } from '../i18n.js';
 import { DietDot, ingName, expiryLabel } from '../ui.jsx';
 
 const FILTERS = [
@@ -35,15 +37,62 @@ export function DishCard({ r }) {
         <div className={'dish-status ' + (r.majorMissing.length ? 'need' : 'have')}>{status}</div>
         {r.usesSoon.length > 0 && <div className="pill warn">Uses up {r.usesSoon.map(ingName).join(', ')}</div>}
         {r.notes.length > 0 && <div className="pill info">{r.notes[0]}</div>}
+        {r.goalWhy && <div className="pill good">{r.goalWhy}</div>}
+        {r.repeat?.reasons[0] && <div className="pill">{r.repeat.reasons[0]}</div>}
       </div>
     </button>
   );
 }
 
-export default function Home({ pantry, addToPantry, members, filters, setFilters, ratings, history, aiRecipes, aiStatus, notify }) {
-  const params = { pantry, members, filters, ratings };
-  const { ready, almost } = useMemo(() => suggest(params), [pantry, members, filters, ratings]);
-  const tips = useMemo(() => buyTips(params), [pantry, members, filters, ratings]);
+function TodayCard({ plan, findRecipe, log, logMeal, notify }) {
+  const today = dayKey();
+  const day = plan[today];
+  const slots = SLOTS.filter(s => day?.[s] && findRecipe(day[s]));
+  if (!slots.length) {
+    return (
+      <div className="card today-card">
+        <h3>{t("Today's menu")}</h3>
+        <p className="muted">Let Ballava decide. Plan the whole week in one tap.</p>
+        <button className="btn primary" onClick={() => go('plan')}>{t('Plan my week')}</button>
+      </div>
+    );
+  }
+  return (
+    <div className="card today-card">
+      <div className="row between"><h3>{t("Today's menu")}</h3><button className="btn link" onClick={() => go('plan')}>Change</button></div>
+      {slots.map(s => {
+        const r = findRecipe(day[s]);
+        const done = log.some(e => e.date === today && e.slot === s && e.recipeId === r.id);
+        return (
+          <div key={s} className="plan-row">
+            <span className="plan-slot">{t(SLOT_LABEL[s])}</span>
+            <button className="plan-dish" onClick={() => go('recipe/' + r.id)}><DietDot diet={r.diet} /> {r.name}</button>
+            <span className="plan-actions">
+              {done ? <span className="pill good">✓</span> : <button className="icon-btn sm" aria-label={`Mark ${r.name} as cooked`} onClick={() => { logMeal({ recipeId: r.id, name: r.name, date: today, slot: s }); notify(`Logged ${r.name}`); }}>✓</button>}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function Home({ pantry, addToPantry, members, filters, setFilters, ratings, history, log, logMeal, plan, pins, aiRecipes, aiStatus, notify, findRecipe, extraRecipes, hidden, extra, catalog }) {
+  const params = { pantry, members, filters, ratings, extraRecipes, hidden };
+  const today = dayKey();
+  const { ready, almost } = useMemo(() => {
+    const found = suggest(params);
+    // Push down what the family just ate, and pull up what suits their goals.
+    const rank = list => list.map(r => {
+      const repeat = repeatCheck(r.recipe, log, { date: today, pins, extra });
+      const goal = goalScore(r.recipe, members);
+      return { ...r, repeat, goalWhy: goal.why[0], rank: r.score - repeat.penalty + goal.bonus };
+    }).sort((a, b) => b.rank - a.rank);
+    return { ready: rank(found.ready), almost: rank(found.almost) };
+  }, [pantry, members, filters, ratings, log, pins, extraRecipes, hidden, extra, today]);
+  const tips = useMemo(() => buyTips(params), [pantry, members, filters, ratings, extraRecipes, hidden]);
+  const prep = prepTonight(plan, today, extra);
+  const eveningNudge = new Date().getHours() >= 18 && !log.some(e => e.date === today);
   const soon = useSoon(pantry);
   const saved = history.reduce((n, h) => n + (h.saved?.length || 0), 0);
 
@@ -80,6 +129,16 @@ export default function Home({ pantry, addToPantry, members, filters, setFilters
         <button className="btn ghost sm" onClick={() => go('ai')}>✨ AI Chef</button>
       </header>
 
+      {catalog.announcements.map(a => <div key={a.id} className="note info">📣 {a.text}</div>)}
+      <TodayCard plan={plan} findRecipe={findRecipe} log={log} logMeal={logMeal} notify={notify} />
+      {prep.length > 0 && (
+        <button className="card prep-card link-card" onClick={() => go('plan')}>
+          <h3>🌙 {t('Prep for tomorrow')}</h3>
+          {prep.slice(0, 2).map(p => <p key={p.recipeId}><b>{p.name}:</b> {p.text}</p>)}
+        </button>
+      )}
+      {eveningNudge && <button className="soon-banner" onClick={() => go('track')}><b>{t('What did you make today?')}</b> One tap keeps your diary up to date.</button>}
+
       <div className="stats">
         <div><b>{history.length}</b><span>meals cooked</span></div>
         <div><b>{saved}</b><span>items saved from waste</span></div>
@@ -100,7 +159,7 @@ export default function Home({ pantry, addToPantry, members, filters, setFilters
       </div>
       {members.length > 0 && <p className="muted small">Showing dishes that suit everyone in your family ({members.map(m => m.name).join(', ')}).</p>}
 
-      <h3 className="section-title">Cook now <span className="count">{ready.length}</span></h3>
+      <h3 className="section-title">{t('Cook now')} <span className="count">{ready.length}</span></h3>
       {ready.length === 0 && <p className="muted">Nothing complete yet. Check "Almost there" below, or add more to your kitchen.</p>}
       <div className="dish-list">{ready.slice(0, 12).map(r => <DishCard key={r.recipe.id} r={r} />)}</div>
 
@@ -113,7 +172,7 @@ export default function Home({ pantry, addToPantry, members, filters, setFilters
         </div>
       )}
 
-      <h3 className="section-title">Almost there <span className="count">{almost.length}</span></h3>
+      <h3 className="section-title">{t('Almost there')} <span className="count">{almost.length}</span></h3>
       <div className="dish-list">{almost.slice(0, 10).map(r => <DishCard key={r.recipe.id} r={r} />)}</div>
 
       {Object.keys(aiRecipes).length > 0 && (

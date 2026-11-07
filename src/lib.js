@@ -111,6 +111,6 @@ export async function api(path, body) {
   } : undefined);
   let data = {};
   try { data = await res.json(); } catch { /* not JSON */ }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status, data });
   return data;
 }

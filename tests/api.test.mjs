@@ -7,6 +7,7 @@ let server, base;
 const realFetch = globalThis.fetch;
 
 before(async () => {
+  process.env.DB_PATH = ':memory:';
   delete process.env.ANTHROPIC_API_KEY;
   server = createServer();
   await new Promise(r => server.listen(0, r));

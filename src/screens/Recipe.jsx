@@ -1,14 +1,19 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ASSUMED } from '../../shared/ingredients.mjs';
 import { householdCheck, recipeText } from '../../shared/engine.mjs';
 import { Header, DietDot, Spice, Stars, Empty, ingName } from '../ui.jsx';
+import { platesFor, repeatCheck, dayKey, WEEKDAYS } from '../../shared/planner.mjs';
 import { go, whatsappLink } from '../lib.js';
+import { t } from '../i18n.js';
 
-export default function Recipe({ recipe, pantry, members, addToShopping, notify, ratings }) {
+export default function Recipe({ recipe, pantry, members, addToShopping, notify, ratings, log, pins, setPins, extra }) {
+  const [weekday, setWeekday] = useState(0);
   if (!recipe) return <div className="screen"><Header title="Recipe" back /><Empty title="Recipe not found">It may have been removed. <a href="#/home">Go home</a></Empty></div>;
   const have = new Set([...pantry.map(p => p.id), ...ASSUMED]);
   const house = householdCheck(recipe, members);
   const missing = recipe.ingredients.filter(it => !it.optional && !it.options.some(id => have.has(id)));
+  const plates = house.ok ? platesFor(recipe, members) : [];
+  const lastMade = repeatCheck(recipe, log, { date: dayKey(), extra }).lastDays;
 
   return (
     <div className="screen recipe">
@@ -23,6 +28,13 @@ export default function Recipe({ recipe, pantry, members, addToShopping, notify,
 
       {!house.ok && <div className="note bad">{house.reason}</div>}
       {house.ok && house.notes.map(n => <div key={n} className="note info">{n}</div>)}
+      {lastMade !== null && <div className="note warn">{lastMade === 0 ? 'You already made this today.' : `You made this ${lastMade} day${lastMade > 1 ? 's' : ''} ago.`}</div>}
+      {plates.length > 0 && (
+        <div className="card plates">
+          <h3>🍽 {t('One meal, many plates')}</h3>
+          {plates.map(p => <p key={p.who}><b>{p.who}:</b> {p.tips.join(' ')}</p>)}
+        </div>
+      )}
       {recipe.prep && <div className="note warn"><b>Plan ahead:</b> {recipe.prep}</div>}
       {recipe.safety && <div className="note bad"><b>Food safety:</b> {recipe.safety}</div>}
       {recipe.tip && <div className="note info"><b>Tip:</b> {recipe.tip}</div>}
@@ -54,8 +66,19 @@ export default function Recipe({ recipe, pantry, members, addToShopping, notify,
         ))}
       </ol>
 
+      <div className="row pin-row">
+        <span className="muted small">Family tradition?</span>
+        <select aria-label="Day of the week" value={weekday} onChange={e => setWeekday(Number(e.target.value))}>
+          {WEEKDAYS.map((d, i) => <option key={d} value={i}>Every {d}</option>)}
+        </select>
+        <button className="btn sm" onClick={() => {
+          if (!pins.some(p => p.recipeId === recipe.id && p.weekday === weekday)) setPins([...pins, { recipeId: recipe.id, weekday, slot: recipe.meal.includes('lunch') ? 'lunch' : recipe.meal[0] }]);
+          notify(`${recipe.name} is now your ${WEEKDAYS[weekday]} favourite`);
+        }}>⭐ Pin</button>
+      </div>
+
       <div className="sticky-cta">
-        <button className="btn primary big" onClick={() => go('cook/' + recipe.id)}>Start cooking</button>
+        <button className="btn primary big" onClick={() => go('cook/' + recipe.id)}>{t('Start cooking')}</button>
       </div>
     </div>
   );

@@ -5,7 +5,9 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { createServer } from '../server/server.mjs';
+process.env.DB_PATH = ':memory:';
+delete process.env.ANTHROPIC_API_KEY;
+const { createServer } = await import('../server/server.mjs');
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -20,7 +22,7 @@ before(async () => {
   server = createServer();
   await new Promise(r => server.listen(0, r));
   base = `http://localhost:${server.address().port}/`;
-  browser = await chromium.launch();
+  browser = await chromium.launch({ channel: process.env.PW_CHANNEL || undefined });
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   page = await ctx.newPage();
   page.on('pageerror', e => errors.push(e.message));
@@ -31,6 +33,7 @@ before(async () => {
 after(async () => { await browser?.close(); server?.close(); });
 
 test('first visit shows the welcome screen', async () => {
+  await page.getByRole('button', { name: 'Continue without an account' }).click();
   await page.getByText('Cooks with you today. For you tomorrow.').waitFor();
   await snap('01-welcome');
 });
@@ -127,6 +130,7 @@ test('cook mode: steps, timer, whistle counter, Bachao, finish', async () => {
 });
 
 test('family: a vegetarian Jain member changes suggestions', async () => {
+  await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Family', exact: true }).click();
   await page.getByPlaceholder('e.g. Amma').fill('Amma');
   await page.locator('select').first().selectOption('veg');

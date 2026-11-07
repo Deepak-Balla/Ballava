@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { BY_ID } from '../../shared/ingredients.mjs';
 import { useSoon } from '../../shared/engine.mjs';
+import { leftoverChains } from '../../shared/planner.mjs';
 import { Empty, Stars, ingName } from '../ui.jsx';
 import { speak, stopSpeaking, beep, keepAwake, fmtTime, go, SpeechRec } from '../lib.js';
 import { BachaoList } from './Bachao.jsx';
@@ -10,7 +11,7 @@ export default function Cook(props) {
   return <CookMode key={props.recipe.id} {...props} />;
 }
 
-function CookMode({ recipe, pantry, setPantry, setHistory, notify }) {
+function CookMode({ recipe, pantry, setPantry, logMeal, addToPantry, notify }) {
   const [i, setI] = useState(0);
   const [timers, setTimers] = useState([]); // {id, label, endsAt, done}
   const [now, setNow] = useState(Date.now());
@@ -117,7 +118,7 @@ function CookMode({ recipe, pantry, setPantry, setHistory, notify }) {
     }
   }, [wCount, wTarget, i]);
 
-  if (finishing) return <Finish recipe={recipe} pantry={pantry} setPantry={setPantry} setHistory={setHistory} notify={notify} />;
+  if (finishing) return <Finish recipe={recipe} pantry={pantry} setPantry={setPantry} logMeal={logMeal} addToPantry={addToPantry} notify={notify} />;
 
   return (
     <div className="screen cook">
@@ -184,8 +185,10 @@ function CookMode({ recipe, pantry, setPantry, setHistory, notify }) {
   );
 }
 
-function Finish({ recipe, pantry, setPantry, setHistory, notify }) {
+function Finish({ recipe, pantry, setPantry, logMeal, addToPantry, notify }) {
   const [rating, setRating] = useState(0);
+  const chains = leftoverChains(recipe);
+  const [left, setLeft] = useState(() => new Set());
   const soonIds = new Set(useSoon(pantry).map(p => p.id));
   // Perishable items from this recipe that are in the kitchen: offer to mark them used up.
   const usable = pantry.filter(p => BY_ID[p.id]?.shelfDays && BY_ID[p.id].shelfDays <= 7 && recipe.ingredients.some(it => it.options.includes(p.id)));
@@ -193,8 +196,9 @@ function Finish({ recipe, pantry, setPantry, setHistory, notify }) {
 
   function save() {
     const saved = [...used].filter(id => soonIds.has(id));
-    setHistory(h => [...h, { recipeId: recipe.id, name: recipe.name, at: Date.now(), rating: rating || null, saved }]);
+    logMeal({ recipeId: recipe.id, name: recipe.name, rating: rating || null, saved });
     if (used.size) setPantry(pantry.filter(p => !used.has(p.id)));
+    if (left.size) addToPantry([...left]);
     notify(saved.length ? `Saved! You rescued ${saved.length} item(s) from going to waste.` : 'Saved! Enjoy your meal.');
     go('home');
   }
@@ -215,6 +219,17 @@ function Finish({ recipe, pantry, setPantry, setHistory, notify }) {
             </label>
           ))}
           <p className="muted small">Ticked items are removed from your kitchen.</p>
+        </div>
+      )}
+      {chains.length > 0 && (
+        <div className="card">
+          <h3>Anything left over?</h3>
+          {chains.map(c => (
+            <label key={c.item} className="check">
+              <input type="checkbox" checked={left.has(c.item)} onChange={e => { const n = new Set(left); e.target.checked ? n.add(c.item) : n.delete(c.item); setLeft(n); }} />
+              <span>{c.name} <span className="muted small">becomes {c.ideas.slice(0, 2).join(' or ')} tomorrow</span></span>
+            </label>
+          ))}
         </div>
       )}
       <button className="btn primary big" onClick={save}>Save and finish</button>

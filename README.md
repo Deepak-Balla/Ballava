@@ -5,13 +5,19 @@
 Ballava is a web app that runs in any browser and installs on a phone like a normal app. It:
 
 - remembers what's in your kitchen and warns you before things spoil
-- suggests dishes from what you already have (52 everyday recipes, mostly Indian)
+- suggests dishes from what you already have (103 everyday recipes, mostly Indian)
 - tells you the **one thing to buy** that unlocks the most dishes
 - guides you while cooking: big steps, timers, a **pressure-cooker whistle counter**, read-aloud and hands-free voice
 - **Bachao!** mode rescues dishes (too salty, burnt, split kadhi…) and says honestly when food isn't safe
 - understands family needs: veg, Jain, no onion or garlic, diabetic, fasting, allergies, spice level
 - keeps a shopping list you can share on WhatsApp
 - optional **AI Chef**: invents new dishes and reads a photo of your fridge (needs an AI key)
+- **plans the whole week** in one tap, with no repeated dishes, and lets you lock, swap or vote on meals
+- **food diary and dashboard**: logs what you made and spots what's missing, like greens or protein
+- **one meal, many plates**: tells you how to adjust one dish for each family member
+- **tiffin planner, prep reminders, leftover ideas and fasting days**
+- **family accounts**: one shared kitchen, plan and list across phones, by family code
+- **admin portal** at `/admin` for recipes, ingredients, Bachao fixes, announcements and festivals
 
 You don't need to be technical to run it. Follow the steps below in order.
 
@@ -64,7 +70,7 @@ Think of the app as a restaurant:
 
 The app is already built, so `npm start` works without installing anything else.
 
-**First time in the app:** tap **"Try with a sample kitchen"** to see it working instantly, or **"Add what I have"** and type something like `2 tamatar, pyaz, paneer, leftover rice`.
+**First time in the app:** create an account (or tap **Continue without an account**), then tap **"Try with a sample kitchen"** to see it working instantly, or **"Add what I have"** and type something like `2 tamatar, pyaz, paneer, leftover rice`.
 
 ### Use it on your phone (same Wi-Fi)
 1. Find your computer's local address: Windows: type `ipconfig` and look for "IPv4 Address", such as `192.168.1.5`. Mac: System Settings → Wi-Fi → Details → IP address.
@@ -77,9 +83,9 @@ The app is already built, so `npm start` works without installing anything else.
 ```
 npm test
 ```
-This runs **32 automatic checks**. For example: every recipe uses real ingredients, "leftover chawal" isn't mistaken for raw rice, a vegetarian family member never sees chicken, a nut allergy hides dishes that need nuts, the server can't be tricked into showing private files, and AI errors are handled politely. You should see `# pass 32` and `# fail 0`.
+This runs **more than 90 automatic checks**. For example: every recipe uses real ingredients, "leftover chawal" isn't mistaken for raw rice, a vegetarian family member never sees chicken, a nut allergy hides dishes that need nuts, the server can't be tricked into showing private files, and AI errors are handled politely. You should see `fail 0` at the end.
 
-**Full browser check (about 30 seconds, one-time install):**
+**Full browser check (about a minute, one-time install):**
 ```
 npm install
 npx playwright install chromium
@@ -112,6 +118,20 @@ This opens a hidden Chrome on a phone-sized screen and does everything a user wo
 
 Keep the key secret: never share the `.env` file or put it in the app's code. The key stays on the server; browsers never see it. Each visitor can make at most 10 AI requests per minute (`AI_RATE_LIMIT` in `.env`), which protects your bill.
 
+## 6b. Admin portal and accounts
+
+**Create your admin login (one time):**
+```
+npm run create-admin -- you@example.com
+```
+This shows a password once, so save it. Then open **http://localhost:3000/admin**. Run the command again to reset the password. Use an email that isn't a normal user account.
+
+From the portal you can add and edit recipes (draft, then review, then publish; recipes that break the safety rules can't be published), hide recipes, add ingredients and Bachao fixes, post announcements, keep the festival calendar, and disable users. Admins never see a family's diet or health details.
+
+**Your data:** accounts and family data live in one file, `data/ballava.db`. **Back this file up.** Users can download or delete their own data from More, Account.
+
+**Phone sign-in** needs an SMS service. To try it without one, add `OTP_DEV_MODE=1` to `.env` and the code appears on screen. For real SMS, add your Twilio details (see `.env.example`). Sending SMS to India also needs DLT registration.
+
 ## 7. Put it online (so anyone can use it)
 
 Any host that runs Node.js works, for example Render, Railway, Fly.io, or a small cloud server:
@@ -119,6 +139,8 @@ Any host that runs Node.js works, for example Render, Railway, Fly.io, or a smal
 - **Build command:** `npm install && npm run build` (or nothing, since `dist/` is already built)
 - **Environment variables:** add `ANTHROPIC_API_KEY` there if you want AI. Don't upload `.env`.
 - Hosts give you an **https** address, so phone install, microphone and offline mode all work.
+- **Keep your data:** the host must give you a permanent disk for `data/ballava.db`, or set `DB_PATH` to a folder on one. Without it, accounts vanish on every restart.
+- Set `NODE_ENV=production`, and don't set `OTP_DEV_MODE` on a live site.
 
 ## 8. Project map
 

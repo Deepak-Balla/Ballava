@@ -59,7 +59,8 @@ export const ALL_RECIPES = RECIPES.map(prepareRecipe);
 export const RECIPE_BY_ID = Object.fromEntries(ALL_RECIPES.map(r => [r.id, r]));
 
 // ---------------------------------------------------------- text -> ingredients
-const ALIAS_LIST = (() => {
+let ALIAS_LIST = buildAliases();
+function buildAliases() {
   const list = [];
   for (const ing of INGREDIENTS) {
     const names = new Set([ing.id.replace(/_/g, ' '), ing.name.toLowerCase(), ...ing.aliases.map(a => a.toLowerCase())]);
@@ -67,7 +68,7 @@ const ALIAS_LIST = (() => {
   }
   // Longest names first so "leftover rice" beats "rice" and "hari mirch" beats "mirch".
   return list.sort((a, b) => b[0].length - a[0].length);
-})();
+}
 
 export function normalize(s) {
   return String(s).toLowerCase()
@@ -132,6 +133,7 @@ export function householdCheck(recipe, members = []) {
     if (m.noOnionGarlic && recipe.needsOnionGarlic) return { ok: false, reason: `${who} avoids onion and garlic` };
     if (m.diabetic && recipe.tags.includes('sweet')) return { ok: false, reason: `Sweet dish (${who} is diabetic)` };
     if (m.fasting && !recipe.tags.includes('vrat')) return { ok: false, reason: `${who} is fasting today` };
+    if (m.goals?.includes('pregnancy') && recipe.time <= 15 && recipe.ingredients.some(it => !it.optional && it.options.includes('sprouts'))) return { ok: false, reason: `Raw or lightly cooked sprouts aren't advised for ${who} during pregnancy` };
     // Things we can work around: give a tip instead of hiding the dish.
     const optAllergen = (m.allergies || []).find(a => recipe.ingredients.some(it => it.optional && it.options.some(id => BY_ID[id]?.allergens.includes(a))));
     if (optAllergen) notes.push(`Skip the optional ${optAllergen} items for ${who}.`);
@@ -173,12 +175,19 @@ export function matchRecipe(recipe, pantryIds, { soonIds = [] } = {}) {
   };
 }
 
+// The live recipe book: built-in dishes, with admin edits replacing them by id and hidden ones removed.
+export function recipesFrom(extraRecipes = [], hidden = []) {
+  const replaced = new Set(extraRecipes.map(r => r.id));
+  const gone = new Set(hidden);
+  return [...ALL_RECIPES.filter(r => !replaced.has(r.id)), ...extraRecipes].filter(r => !gone.has(r.id));
+}
+
 // ratings: { [recipeId]: number 1-5 }
-export function suggest({ pantry = [], members = [], filters = {}, ratings = {}, now = Date.now(), extraRecipes = [] } = {}) {
+export function suggest({ pantry = [], members = [], filters = {}, ratings = {}, now = Date.now(), extraRecipes = [], hidden = [] } = {}) {
   const pantryIds = pantry.map(p => p.id);
   const soonIds = useSoon(pantry, now).map(p => p.id);
   const results = [];
-  for (const recipe of [...ALL_RECIPES, ...extraRecipes]) {
+  for (const recipe of recipesFrom(extraRecipes, hidden)) {
     if (filters.veg && recipe.diet !== 'veg') continue;
     if (filters.quick && recipe.time > 20) continue;
     if (filters.leftover && !recipe.tags.includes('leftover')) continue;
@@ -292,4 +301,48 @@ export function normalizeAiRecipe(raw) {
   prepared.jainOk = !required.some(it => JAIN_BLOCKED.includes(it.options[0]));
   prepared.hasChilli = ing.some(it => ['green_chilli', 'red_chilli_powder', 'dry_red_chilli'].includes(it.options[0]));
   return prepared;
+}
+
+// ------------------------------------------------------------------- admin content
+const BUILTIN_INGREDIENTS = INGREDIENTS.length;
+const BUILTIN_RESCUES = RESCUES.length;
+
+// Add what admins published (new ingredients and Bachao fixes) to the built-in catalog.
+export function applyCatalog({ ingredients = [], rescues = [] } = {}) {
+  for (const old of INGREDIENTS.splice(BUILTIN_INGREDIENTS)) delete BY_ID[old.id];
+  for (const raw of ingredients) {
+    if (BY_ID[raw.id]) continue;
+    const item = { allergens: [], diet: 'veg', aliases: [], shelfDays: null, ...raw };
+    INGREDIENTS.push(item); BY_ID[item.id] = item;
+  }
+  ALIAS_LIST = buildAliases();
+  RESCUES.splice(BUILTIN_RESCUES);
+  RESCUES.push(...rescues);
+}
+
+// The checks every recipe must pass before it can be published. Returns a list of problems.
+export function validateRecipe(raw) {
+  const errors = [];
+  if (!raw || typeof raw !== 'object') return ['Recipe is empty'];
+  if (!/^[a-z0-9_]{2,40}$/.test(raw.id || '')) errors.push('Id must be 2-40 lowercase letters, numbers or underscores');
+  if (!String(raw.name || '').trim()) errors.push('Name is required');
+  if (!(Number(raw.time) > 0)) errors.push('Time must be more than 0 minutes');
+  if (!(Number(raw.serves) > 0)) errors.push('Serves must be more than 0');
+  if (![1, 2, 3].includes(Number(raw.spice))) errors.push('Spice must be 1, 2 or 3');
+  if (!Array.isArray(raw.meal) || !raw.meal.length) errors.push('Choose at least one meal type');
+  if (!Array.isArray(raw.ing) || !raw.ing.length) errors.push('Add at least one ingredient');
+  if (!Array.isArray(raw.steps) || raw.steps.length < 2) errors.push('Add at least two steps');
+  if (errors.length) return errors;
+  for (const line of raw.ing) for (const id of parseIngredientLine(line).options) if (!BY_ID[id]) errors.push(`Unknown ingredient "${id}"`);
+  if (errors.length) return errors;
+  const r = prepareRecipe({ tags: [], ...raw });
+  if (!r.ingredients.some(i => !i.optional)) errors.push('At least one ingredient must be required');
+  if (r.steps.some(st => st.text.length <= 5)) errors.push('One of the steps is too short');
+  const tags = r.tags;
+  if (tags.includes('jain') && !r.jainOk) errors.push('Tagged jain but needs onion, garlic or root vegetables');
+  if (tags.includes('vrat') && r.needsOnionGarlic) errors.push('Tagged vrat but needs onion or garlic');
+  if (tags.includes('gluten-free') && r.allergens.includes('gluten')) errors.push('Tagged gluten-free but contains gluten');
+  if (tags.includes('diabetic-friendly') && tags.includes('sweet')) errors.push('A sweet dish cannot be tagged diabetic-friendly');
+  if (r.diet === 'nonveg' && !r.safety) errors.push('Meat and fish dishes need a food-safety note');
+  return errors;
 }

@@ -41,9 +41,16 @@ const RAW = [
   ['sweet_corn', 'Sweet corn', 'Vegetables', 5, 'corn, bhutta, makka, sweetcorn'],
   ['beetroot', 'Beetroot', 'Vegetables', 14, 'chukandar, beet, beets'],
   ['sweet_potato', 'Sweet potato', 'Vegetables', 14, 'shakarkandi, shakarkand, chilagada dumpa, sweet potatoes'],
+  ['pumpkin', 'Pumpkin', 'Vegetables', 14, 'kaddu, sitaphal, gummadikaya, parangikai'],
+  ['ridge_gourd', 'Ridge gourd', 'Vegetables', 5, 'turai, tori, beerakaya, peerkangai'],
+  ['bitter_gourd', 'Bitter gourd', 'Vegetables', 5, 'karela, kakarakaya, pavakkai'],
+  ['radish', 'Radish', 'Vegetables', 7, 'mooli, mullangi, radishes'],
+  ['mint', 'Mint leaves', 'Vegetables', 4, 'pudina, pudeena, mint'],
   // Fruits
   ['banana', 'Banana', 'Fruits', 4, 'kela, kele, arati pandu, vazhaipazham, bananas'],
   ['apple', 'Apple', 'Fruits', 14, 'seb, apples'],
+  ['mango', 'Mango', 'Fruits', 5, 'aam, mamidi, maanga, mangoes'],
+  ['papaya', 'Papaya', 'Fruits', 4, 'papita, boppayi'],
   // Dairy & eggs
   ['milk', 'Milk', 'Dairy & Eggs', 3, 'doodh, dudh, paalu, paal', { allergens: ['dairy'] }],
   ['curd', 'Curd', 'Dairy & Eggs', 5, 'dahi, yogurt, yoghurt, perugu, thayir, mosaru', { allergens: ['dairy'] }],
@@ -72,6 +79,11 @@ const RAW = [
   ['sabudana', 'Sabudana', 'Grains & Flours', null, 'tapioca pearls, sago, saggubiyyam, javvarisi'],
   ['dosa_batter', 'Idli/dosa batter', 'Grains & Flours', 4, 'dosa batter, idli batter, idli dosa batter, dosa pindi, idli pindi, dosa maavu'],
   ['vermicelli', 'Vermicelli', 'Grains & Flours', null, 'semiya, seviyan, sevai', { allergens: ['gluten'] }],
+  ['ragi', 'Ragi flour', 'Grains & Flours', null, 'nachni, finger millet, ragi flour, ragi pindi, kezhvaragu'],
+  ['jowar', 'Jowar flour', 'Grains & Flours', null, 'sorghum, jonna pindi, cholam, jowar flour'],
+  ['bajra', 'Bajra flour', 'Grains & Flours', null, 'pearl millet, sajja pindi, kambu, bajra flour'],
+  ['kuttu', 'Kuttu flour', 'Grains & Flours', null, 'buckwheat flour, kuttu ka atta'],
+  ['samak', 'Samak rice', 'Grains & Flours', null, 'vrat ke chawal, barnyard millet, sama rice, bhagar'],
   // Dals & beans
   ['toor_dal', 'Toor dal', 'Dals & Beans', null, 'arhar dal, arhar, tuvar dal, toor, tur dal, pigeon pea, kandi pappu, thuvaram paruppu, dal'],
   ['moong_dal', 'Moong dal', 'Dals & Beans', null, 'yellow moong, split moong, pesara pappu, pesarapappu, pasi paruppu, mung dal, moong'],
@@ -82,6 +94,10 @@ const RAW = [
   ['sprouts', 'Moong sprouts', 'Dals & Beans', 3, 'sprouted moong, moong sprouts, mulake, sprout'],
   ['peanuts', 'Peanuts', 'Dals & Beans', null, 'moongphali, mungfali, groundnut, groundnuts, palli, pallilu, verkadalai, shengdana, peanut', { allergens: ['nuts'] }],
   ['cashew', 'Cashews', 'Dals & Beans', null, 'kaju, jeedipappu, mundiri, cashew nuts, cashew', { allergens: ['nuts'] }],
+  ['rajma', 'Rajma', 'Dals & Beans', null, 'kidney beans, red beans, rajmah'],
+  ['kala_chana', 'Kala chana', 'Dals & Beans', null, 'black chana, black chickpeas, nalla senagalu, kondakadalai'],
+  ['lobia', 'Lobia', 'Dals & Beans', null, 'black eyed peas, chawli, alasandalu, karamani'],
+  ['soya_chunks', 'Soya chunks', 'Dals & Beans', null, 'soya, soyabean chunks, nutrela, meal maker'],
   // Spices
   ['turmeric', 'Turmeric', 'Spices', null, 'haldi, pasupu, manjal'],
   ['red_chilli_powder', 'Red chilli powder', 'Spices', null, 'lal mirch, chilli powder, chili powder, karam, mirchi powder, kashmiri chilli, red chilli'],
@@ -99,6 +115,7 @@ const RAW = [
   ['cardamom', 'Cardamom', 'Spices', null, 'elaichi, elachi, yelakulu, elakkai'],
   ['dry_red_chilli', 'Dry red chilli', 'Spices', null, 'sukhi lal mirch, sabut lal mirch, endu mirapakaya, vara milagai, dried red chilli, red chillies'],
   ['tamarind', 'Tamarind', 'Spices', null, 'imli, chintapandu, puli'],
+  ['sesame', 'Sesame seeds', 'Spices', null, 'til, nuvvulu, ellu'],
   // Basics & sauces
   ['salt', 'Salt', 'Basics & Sauces', null, 'namak, uppu'],
   ['oil', 'Cooking oil', 'Basics & Sauces', null, 'tel, nune, enna, sunflower oil, mustard oil, groundnut oil, cooking oil'],
