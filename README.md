@@ -124,7 +124,7 @@ Keep the key secret: never share the `.env` file or put it in the app's code. Th
 ```
 npm run create-admin -- you@example.com
 ```
-This shows a password once, so save it. Then open **http://localhost:3000/admin**. Run the command again to reset the password. Use an email that isn't a normal user account.
+It asks you to type a password (at least 12 characters, shown as `*`), twice. Press Enter without typing to get a random one instead, and save it, as it's shown only once. Then open **http://localhost:3000/admin**. **Forgot the password?** Run the same command again to set a new one; the old one can't be recovered. Once signed in, you can also change it from the **Change password** tab. Use an email that isn't a normal user account.
 
 From the portal you can add and edit recipes (draft, then review, then publish; recipes that break the safety rules can't be published), hide recipes, add ingredients and Bachao fixes, post announcements, keep the festival calendar, and disable users. Admins never see a family's diet or health details.
 

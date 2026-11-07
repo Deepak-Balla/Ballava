@@ -67,6 +67,12 @@ export function endSession(req, res, scope = 'user') {
   res.setHeader('set-cookie', scope === 'admin' ? cookie(req, name, '', 0, '/api/admin', 'Strict') : cookie(req, name, '', 0, '/', 'Lax'));
 }
 
+// After a password change: sign out everywhere else, but keep this browser signed in.
+export function endOtherSessions(req, userId, scope = 'user') {
+  const token = parseCookies(req)[scope === 'admin' ? ADMIN_COOKIE : USER_COOKIE] || '';
+  run('DELETE FROM sessions WHERE user_id = ? AND scope = ? AND token_hash != ?', userId, scope, sha(token));
+}
+
 function sessionUser(req, name, scope) {
   const token = parseCookies(req)[name];
   if (!token) return null;

@@ -215,6 +215,42 @@ function Audit() {
   );
 }
 
+function ChangePassword({ email, say }) {
+  const blank = { current: '', next: '', confirm: '' };
+  const [f, setF] = useState(blank);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const set = k => e => setF(x => ({ ...x, [k]: e.target.value }));
+
+  async function submit(e) {
+    e.preventDefault();
+    setError('');
+    if (f.next.length < 12) { setError('Please use a new password of at least 12 characters.'); return; }
+    if (f.next !== f.confirm) { setError('The two new passwords do not match.'); return; }
+    setBusy(true);
+    try {
+      await call('password', { current: f.current, next: f.next });
+      setF(blank);
+      say('Password changed. Other devices have been signed out.');
+    } catch (err) { setError(err.message); }
+    setBusy(false);
+  }
+
+  return (
+    <form className="card form" style={{ maxWidth: 480 }} onSubmit={submit}>
+      <h3>Change password</h3>
+      {/* Lets password managers know which account this is for. */}
+      <input type="email" value={email} autoComplete="username" readOnly hidden />
+      <label>Current password<input type="password" value={f.current} onChange={set('current')} autoComplete="current-password" required /></label>
+      <label>New password<input type="password" value={f.next} onChange={set('next')} autoComplete="new-password" minLength={12} required /></label>
+      <label>Type the new password again<input type="password" value={f.confirm} onChange={set('confirm')} autoComplete="new-password" required /></label>
+      <p className="muted small">At least 12 characters. A short phrase of four or five unrelated words is strong and easy to remember. Other devices will be signed out; this one stays signed in.</p>
+      {error && <div className="note bad" role="alert">{error}</div>}
+      <button className="btn primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Change password'}</button>
+    </form>
+  );
+}
+
 export default function Admin() {
   const [admin, setAdmin] = useState(undefined);
   const [tab, setTab] = useState('overview');
@@ -225,13 +261,13 @@ export default function Admin() {
   if (admin === undefined) return null;
   if (!admin) return <SignIn onDone={setAdmin} />;
 
-  const tabs = [['overview', 'Overview'], ['recipes', 'Recipes'], ...Object.entries(CONTENT).map(([k, v]) => [k, v.label]), ['users', 'Users'], ['audit', 'Audit log']];
+  const tabs = [['overview', 'Overview'], ['recipes', 'Recipes'], ...Object.entries(CONTENT).map(([k, v]) => [k, v.label]), ['users', 'Users'], ['audit', 'Audit log'], ['password', 'Change password']];
   return (
     <div className="admin">
       <header className="admin-head">
         <span className="brand-mark">B</span><h1>Ballava Admin</h1>
         <span className="muted small">{admin.email}</span>
-        <button className="btn ghost sm" onClick={async () => { await call('logout', {}); setAdmin(null); }}>Sign out</button>
+        <button className="btn ghost sm" onClick={async () => { await call('logout', {}); setAdmin(null); setTab('overview'); }}>Sign out</button>
       </header>
       <nav className="admin-nav" aria-label="Admin">
         {tabs.map(([id, label]) => <button key={id} className={'chip' + (tab === id ? ' on' : '')} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</button>)}
@@ -241,6 +277,7 @@ export default function Admin() {
       {CONTENT[tab] && <Content key={tab} kind={tab} say={say} />}
       {tab === 'users' && <Users say={say} />}
       {tab === 'audit' && <Audit />}
+      {tab === 'password' && <ChangePassword email={admin.email} say={say} />}
       {message && <div className="toast" role="status">{message}</div>}
     </div>
   );

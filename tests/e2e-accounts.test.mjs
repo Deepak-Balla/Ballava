@@ -424,6 +424,35 @@ test('admin: publish a recipe and it reaches users; bad recipes are stopped', as
   await p.context().close();
 });
 
+test('admin: change password from the portal', async () => {
+  const me = { email: 'pw-admin@ballava.test', password: 'old-password-123' };
+  createUser({ name: 'Pw', email: me.email, passwordHash: await hashPassword(me.password), role: 'admin' });
+  const p = await device({ viewport: { width: 1200, height: 800 } });
+  await p.goto(base + 'admin');
+  await p.getByLabel('Email').fill(me.email);
+  await p.getByLabel('Password').fill(me.password);
+  await p.getByRole('button', { name: 'Sign in' }).click();
+  await p.getByRole('button', { name: 'Change password', exact: true }).first().click();
+  await p.getByLabel('Current password').fill(me.password);
+  await p.getByLabel('New password', { exact: true }).fill('new-password-456');
+  await p.getByLabel('Type the new password again').fill('new-password-457');
+  await p.locator('form').getByRole('button', { name: 'Change password' }).click();
+  await p.getByRole('alert').getByText(/do not match/).waitFor();
+  await p.getByLabel('Type the new password again').fill('new-password-456');
+  await p.locator('form').getByRole('button', { name: 'Change password' }).click();
+  await p.getByText('Password changed.').waitFor();
+  await snap(p, '33-admin-password');
+  await p.getByRole('button', { name: 'Sign out' }).click();
+  await p.getByLabel('Email').fill(me.email);
+  await p.getByLabel('Password').fill(me.password);
+  await p.getByRole('button', { name: 'Sign in' }).click();
+  await p.getByRole('alert').getByText(/not right/).waitFor();
+  await p.getByLabel('Password').fill('new-password-456');
+  await p.getByRole('button', { name: 'Sign in' }).click();
+  await p.getByText('Meals logged').waitFor();
+  await p.context().close();
+});
+
 test('every screen fits a phone', async () => {
   for (const r of ['home', 'plan', 'track', 'pantry', 'list', 'more', 'family', 'bachao', 'ask', 'account', 'ai', 'recipe/dal_tadka']) {
     await page.goto(`${base}#/${r}`);

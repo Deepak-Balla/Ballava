@@ -2,7 +2,7 @@
 import { randomBytes } from 'node:crypto';
 import { all, one, run, transaction } from './db.mjs';
 import {
-  fail, limited, clearLimit, hashPassword, checkPassword, startSession, endSession, currentUser, requireUser, requireAdmin,
+  fail, limited, clearLimit, hashPassword, checkPassword, startSession, endSession, endOtherSessions, currentUser, requireUser, requireAdmin,
   requestOtp, checkOtp, clearOtp, authConfig, createUser,
 } from './auth.mjs';
 import { RECIPES } from '../shared/recipes.mjs';
@@ -205,6 +205,21 @@ function castVote(token, body, ip) {
 // -------------------------------------------------------------- admin
 const audit = (admin, action, target) => run('INSERT INTO audit (admin_id, action, target, at) VALUES (?, ?, ?, ?)', admin.id, action, target || null, Date.now());
 
+async function changeAdminPassword(req, admin, body) {
+  const key = 'adminpw:' + admin.id;
+  if (limited(key, 5, 900000)) throw fail(429, 'Too many tries. Please wait 15 minutes and try again.');
+  const next = String(body.next || '');
+  if (!(await checkPassword(body.current, admin.password_hash))) throw fail(400, 'Your current password is not right.');
+  if (next.length < 12) throw fail(400, 'Please use a new password of at least 12 characters.');
+  if (next.length > 200) throw fail(400, 'That password is too long.');
+  if (next === body.current) throw fail(400, 'The new password must be different from the current one.');
+  clearLimit(key);
+  run('UPDATE users SET password_hash = ? WHERE id = ?', await hashPassword(next), admin.id);
+  endOtherSessions(req, admin.id, 'admin');
+  audit(admin, 'password.change');
+  return { ok: true };
+}
+
 async function adminLogin(req, res, body, ip) {
   const email = String(body.email || '').trim().toLowerCase();
   const key = `admin:${email}:${ip}`;
@@ -348,6 +363,7 @@ async function adminRoutes(req, res, path, body, ip) {
   const route = `${method} ${area}`;
   if (route === 'POST logout') { endSession(req, res, 'admin'); return { ok: true }; }
   if (route === 'GET me') return { admin: { name: admin.name, email: admin.email } };
+  if (route === 'POST password') return changeAdminPassword(req, admin, await body(BODY_LIMIT));
   if (route === 'GET stats') return adminStats();
   if (route === 'GET users') return { users: adminUsers() };
   if (route === 'POST users' && action === 'disable') return setUserDisabled(admin, id, !!(await body(BODY_LIMIT)).disabled);

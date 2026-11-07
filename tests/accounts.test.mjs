@@ -370,6 +370,39 @@ test('admin changes are written to the audit log', async () => {
   assert.ok(log.includes('recipe.published') && log.includes('login') && log.includes('recipe.hide'), log.join());
 });
 
+test('admin can change their password; other devices are signed out, this one stays in', async () => {
+  const me = { email: 'second-admin@ballava.test', password: 'first-password-123' };
+  createUser({ name: 'Second', email: me.email, passwordHash: await hashPassword(me.password), role: 'admin' });
+  const here = client();
+  const there = client();
+  await here.post('/api/admin/login', me);
+  await there.post('/api/admin/login', me);
+  const next = 'a-brand-new-password';
+
+  assert.equal((await here.post('/api/admin/password', { current: 'wrong-password', next })).status, 400);
+  assert.match((await here.post('/api/admin/password', { current: me.password, next: 'short' })).data.error, /12 characters/);
+  assert.match((await here.post('/api/admin/password', { current: me.password, next: me.password })).data.error, /different/);
+  assert.equal((await here.post('/api/admin/password', { current: me.password, next })).status, 200);
+
+  assert.equal((await here.get('/api/admin/me')).status, 200, 'this browser stays signed in');
+  assert.equal((await there.get('/api/admin/me')).status, 401, 'the other browser is signed out');
+  assert.equal((await client().post('/api/admin/login', me)).status, 401, 'old password no longer works');
+  assert.equal((await client().post('/api/admin/login', { email: me.email, password: next })).status, 200);
+  assert.ok((await here.get('/api/admin/audit')).data.entries.some(e => e.action === 'password.change'));
+});
+
+test('changing the admin password needs an admin sign-in, and guessing is limited', async () => {
+  const user = await newUser();
+  assert.equal((await user.post('/api/admin/password', { current: 'password123', next: 'something-long-enough' })).status, 401);
+  const me = { email: 'third-admin@ballava.test', password: 'first-password-123' };
+  createUser({ name: 'Third', email: me.email, passwordHash: await hashPassword(me.password), role: 'admin' });
+  const a = client();
+  await a.post('/api/admin/login', me);
+  const statuses = [];
+  for (let i = 0; i < 7; i++) statuses.push((await a.post('/api/admin/password', { current: 'guess-' + i, next: 'something-long-enough' })).status);
+  assert.ok(statuses.includes(429), statuses.join());
+});
+
 test('admin sign-out ends the session', async () => {
   const a = await adminClient();
   await a.post('/api/admin/logout');
