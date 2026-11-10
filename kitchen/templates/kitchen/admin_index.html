@@ -1,0 +1,13 @@
+{% extends "admin/index.html" %}
+{% block content %}
+<div class="ballava-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px">
+  {% for label, value in ballava_stats %}
+  <div class="module" style="padding:12px;margin:0">
+    <div style="font-size:1.6rem;font-weight:700">{{ value }}</div>
+    <div>{{ label }}</div>
+  </div>
+  {% endfor %}
+</div>
+<p class="help" style="margin-bottom:16px">Family kitchens, diets, health goals and meal diaries are private and are not shown in this portal.</p>
+{{ block.super }}
+{% endblock %}

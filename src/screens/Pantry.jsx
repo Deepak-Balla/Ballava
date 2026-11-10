@@ -1,20 +1,22 @@
 import React, { useState } from 'react';
-import { INGREDIENTS, CATEGORIES, KITS, ASSUMED } from '../../shared/ingredients.mjs';
-import { parseIngredients, daysLeft, useSoon } from '../../shared/engine.mjs';
+import { getCatalog, daysLeft, useSoon } from '../catalog.js';
 import { Header, ingName, expiryLabel } from '../ui.jsx';
-import { SpeechRec, listenOnce } from '../lib.js';
+import { SpeechRec, listenOnce, api } from '../lib.js';
 
 const DAY = 86400000;
 
 export default function Pantry({ pantry, setPantry, addToPantry, notify }) {
+  const { ingredients: INGREDIENTS, categories: CATEGORIES, kits: KITS, assumed: ASSUMED } = getCatalog();
   const [text, setText] = useState('');
   const [listening, setListening] = useState(false);
   const [cat, setCat] = useState('Vegetables');
   const [confirmClear, setConfirmClear] = useState(false);
   const have = new Set(pantry.map(p => p.id));
 
-  function addText(t) {
-    const { found, unknown } = parseIngredients(t);
+  // Python (kitchen/engine.py) understands what was typed: "2 tamatar, pyaz" -> tomato, onion.
+  async function addText(t) {
+    let found, unknown;
+    try { ({ found, unknown } = await api('parse', { text: t })); } catch (e) { notify(e.status ? e.message : "You're offline. Pick items from the list below instead."); return []; }
     const wanted = found.filter(id => !ASSUMED.includes(id));
     const added = addToPantry(wanted);
     const already = wanted.filter(id => !added.includes(id));

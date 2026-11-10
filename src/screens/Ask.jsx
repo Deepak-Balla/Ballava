@@ -1,12 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { assistantReply } from '../../shared/planner.mjs';
 import { Header } from '../ui.jsx';
-import { go, listenOnce, SpeechRec } from '../lib.js';
+import { go, listenOnce, SpeechRec, brain } from '../lib.js';
 import { t } from '../i18n.js';
 
 const STARTERS = ['What should I cook tonight?', 'Tiffin ideas', "What's planned for tomorrow?", 'What should I prep tonight?'];
 
-export default function Ask({ pantry, members, ratings, log, pins, plan, extraRecipes, hidden, extra, findRecipe }) {
+export default function Ask({ plan, family, findRecipe }) {
   const [messages, setMessages] = useState([{ from: 'bot', text: 'Hi! Ask me what to cook, or tell me what you have.' }]);
   const [text, setText] = useState('');
   const [listening, setListening] = useState(false);
@@ -14,12 +13,18 @@ export default function Ask({ pantry, members, ratings, log, pins, plan, extraRe
 
   useEffect(() => { end.current?.scrollIntoView?.({ block: 'end' }); }, [messages]);
 
-  function ask(question) {
+  // Python (kitchen/planner.py -> assistant_reply) answers, knowing the family, the plan and the kitchen.
+  async function ask(question) {
     const q = question.trim();
     if (!q) return;
-    const { reply, dishes = [] } = assistantReply(q, { pantry, members, ratings, log, pins, plan, extraRecipes, hidden, extra });
-    setMessages(m => [...m, { from: 'me', text: q }, { from: 'bot', text: reply, dishes }]);
+    setMessages(m => [...m, { from: 'me', text: q }]);
     setText('');
+    try {
+      const { reply, dishes = [] } = await brain('ask', { ...family, plan, text: q });
+      setMessages(m => [...m, { from: 'bot', text: reply, dishes }]);
+    } catch (err) {
+      setMessages(m => [...m, { from: 'bot', text: err.message }]);
+    }
   }
 
   return (

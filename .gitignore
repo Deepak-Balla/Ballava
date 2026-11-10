@@ -2,3 +2,10 @@ node_modules/
 .env
 tests/screenshots/
 data/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+staticfiles/
+test-screenshots/

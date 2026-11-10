@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
-import { parseIngredients, shoppingText } from '../../shared/engine.mjs';
+import { shoppingText } from '../catalog.js';
 import { Header, Empty, ingName } from '../ui.jsx';
-import { whatsappLink } from '../lib.js';
+import { whatsappLink, api } from '../lib.js';
 
 export default function Shopping({ shopping, setShopping, addToShopping, addToPantry, notify }) {
   const [text, setText] = useState('');
   const open = shopping.filter(s => !s.done);
   const done = shopping.filter(s => s.done);
 
-  function add(e) {
+  async function add(e) {
     e.preventDefault();
-    const { found, unknown } = parseIngredients(text);
+    let found, unknown;
+    try { ({ found, unknown } = await api('parse', { text })); } catch (err) { notify(err.message); return; }
     addToShopping(found);
     if (unknown.length) notify(`Didn't recognise: ${unknown.join(', ')}`);
     setText('');

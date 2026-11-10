@@ -1,8 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { dashboard, dayKey, addDays, slotNow, SLOTS, SLOT_LABEL, WEEKDAYS } from '../../shared/planner.mjs';
-import { recipesFrom } from '../../shared/engine.mjs';
-import { Header, Empty } from '../ui.jsx';
-import { go, listenOnce, SpeechRec } from '../lib.js';
+import { getCatalog, dayKey, addDays, slotNow, SLOTS, SLOT_LABEL, WEEKDAYS } from '../catalog.js';
+import { Header, Empty, Thinking } from '../ui.jsx';
+import { go, listenOnce, SpeechRec, useBrain } from '../lib.js';
 import { t } from '../i18n.js';
 
 const GROUPS = [['greens', 'Leafy greens', '🥬'], ['vegetables', 'Vegetables', '🥕'], ['protein', 'Protein', '🫘'], ['wholegrain', 'Whole grains', '🌾'], ['fruit', 'Fruit', '🍌']];
@@ -50,14 +49,22 @@ function QuickLog({ recipes, plan, logMeal, notify, log }) {
   );
 }
 
-export default function Track({ history, setHistory, log, logMeal, plan, extraRecipes, hidden, extra, notify }) {
+const EMPTY = { total: 0, weekCount: 0, variety: null, groups: {}, insights: [], byDay: {}, top: [], saved: 0 };
+
+export default function Track({ history, setHistory, log, logMeal, plan, aiRecipes, catalog, notify }) {
   const [offset, setOffset] = useState(0);
-  const recipes = useMemo(() => [...recipesFrom(extraRecipes, hidden), ...Object.values(extra)], [extraRecipes, hidden, extra]);
-  const d = useMemo(() => dashboard(history, { extra }), [history, extra]);
+  const recipes = useMemo(() => {
+    const hidden = new Set(catalog.hidden);
+    return [...getCatalog().recipes.filter(r => !hidden.has(r.id)), ...Object.values(aiRecipes)];
+  }, [catalog, aiRecipes]);
+  // Python (kitchen/planner.py -> dashboard) studies the diary: food groups, repeats, forgotten favourites.
+  const brain = useBrain('dashboard', { history, aiRecipes });
+  const d = brain.data ? { ...EMPTY, ...brain.data } : EMPTY;
   const today = dayKey();
   const weekEnd = addDays(today, -offset * 7);
   const week = Array.from({ length: 7 }, (_, i) => addDays(weekEnd, -i));
   const most = Math.max(1, ...Object.values(d.groups));
+  const group = id => d.groups[id] || 0;
 
   const removeEntry = entry => setHistory(h => h.filter(x => (x.id ? x.id !== entry.id : !(x.at === entry.at && x.name === entry.name))));
 
@@ -66,6 +73,7 @@ export default function Track({ history, setHistory, log, logMeal, plan, extraRe
       <Header title={t('Food diary')} />
       <QuickLog recipes={recipes} plan={plan} logMeal={logMeal} notify={notify} log={log} />
 
+      <Thinking state={brain}>Looking at your week…</Thinking>
       <div className="stats">
         <div><b>{d.weekCount}</b><span>meals in 7 days</span></div>
         <div><b>{d.variety === null ? '–' : d.variety + '%'}</b><span>variety</span></div>
@@ -88,8 +96,8 @@ export default function Track({ history, setHistory, log, logMeal, plan, extraRe
           {GROUPS.map(([id, label, icon]) => (
             <div key={id} className="bar-row">
               <span className="bar-label">{icon} {label}</span>
-              <span className="bar"><span style={{ width: `${(d.groups[id] / most) * 100}%` }} /></span>
-              <b className="bar-count">{d.groups[id]}</b>
+              <span className="bar"><span style={{ width: `${(group(id) / most) * 100}%` }} /></span>
+              <b className="bar-count">{group(id)}</b>
             </div>
           ))}
           <p className="muted small">Counted from the dishes you logged. This is a rough guide, not a nutrition report.</p>

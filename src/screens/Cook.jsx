@@ -1,9 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { BY_ID } from '../../shared/ingredients.mjs';
-import { useSoon } from '../../shared/engine.mjs';
-import { leftoverChains } from '../../shared/planner.mjs';
+import { ingredient, useSoon } from '../catalog.js';
 import { Empty, Stars, ingName } from '../ui.jsx';
-import { speak, stopSpeaking, beep, keepAwake, fmtTime, go, SpeechRec } from '../lib.js';
+import { speak, stopSpeaking, beep, keepAwake, fmtTime, go, SpeechRec, useBrain } from '../lib.js';
 import { BachaoList } from './Bachao.jsx';
 
 export default function Cook(props) {
@@ -11,7 +9,7 @@ export default function Cook(props) {
   return <CookMode key={props.recipe.id} {...props} />;
 }
 
-function CookMode({ recipe, pantry, setPantry, logMeal, addToPantry, notify }) {
+function CookMode({ recipe, pantry, setPantry, logMeal, addToPantry, notify, family }) {
   const [i, setI] = useState(0);
   const [timers, setTimers] = useState([]); // {id, label, endsAt, done}
   const [now, setNow] = useState(Date.now());
@@ -118,7 +116,7 @@ function CookMode({ recipe, pantry, setPantry, logMeal, addToPantry, notify }) {
     }
   }, [wCount, wTarget, i]);
 
-  if (finishing) return <Finish recipe={recipe} pantry={pantry} setPantry={setPantry} logMeal={logMeal} addToPantry={addToPantry} notify={notify} />;
+  if (finishing) return <Finish recipe={recipe} pantry={pantry} setPantry={setPantry} logMeal={logMeal} addToPantry={addToPantry} notify={notify} family={family} />;
 
   return (
     <div className="screen cook">
@@ -185,13 +183,14 @@ function CookMode({ recipe, pantry, setPantry, logMeal, addToPantry, notify }) {
   );
 }
 
-function Finish({ recipe, pantry, setPantry, logMeal, addToPantry, notify }) {
+function Finish({ recipe, pantry, setPantry, logMeal, addToPantry, notify, family }) {
   const [rating, setRating] = useState(0);
-  const chains = leftoverChains(recipe);
+  // Python works out what could be left over, and what it turns into tomorrow.
+  const chains = useBrain('recipe', { ...family, recipeId: recipe.id }).data?.leftovers || [];
   const [left, setLeft] = useState(() => new Set());
   const soonIds = new Set(useSoon(pantry).map(p => p.id));
   // Perishable items from this recipe that are in the kitchen: offer to mark them used up.
-  const usable = pantry.filter(p => BY_ID[p.id]?.shelfDays && BY_ID[p.id].shelfDays <= 7 && recipe.ingredients.some(it => it.options.includes(p.id)));
+  const usable = pantry.filter(p => ingredient(p.id)?.shelfDays && ingredient(p.id).shelfDays <= 7 && recipe.ingredients.some(it => it.options.includes(p.id)));
   const [used, setUsed] = useState(() => new Set(usable.filter(p => soonIds.has(p.id)).map(p => p.id)));
 
   function save() {

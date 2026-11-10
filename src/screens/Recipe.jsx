@@ -1,23 +1,24 @@
 import React, { useState } from 'react';
-import { ASSUMED } from '../../shared/ingredients.mjs';
-import { householdCheck, recipeText } from '../../shared/engine.mjs';
+import { getCatalog, WEEKDAYS } from '../catalog.js';
 import { Header, DietDot, Spice, Stars, Empty, ingName } from '../ui.jsx';
-import { platesFor, repeatCheck, dayKey, WEEKDAYS } from '../../shared/planner.mjs';
-import { go, whatsappLink } from '../lib.js';
+import { go, whatsappLink, useBrain } from '../lib.js';
 import { t } from '../i18n.js';
 
-export default function Recipe({ recipe, pantry, members, addToShopping, notify, ratings, log, pins, setPins, extra }) {
+export default function Recipe({ recipe, pantry, addToShopping, notify, ratings, pins, setPins, family }) {
   const [weekday, setWeekday] = useState(0);
+  // Python (kitchen/api.py -> recipe_info): can the family eat it, portion tips, and when it was last made.
+  const info = useBrain('recipe', { ...family, recipeId: recipe?.id }, !!recipe);
   if (!recipe) return <div className="screen"><Header title="Recipe" back /><Empty title="Recipe not found">It may have been removed. <a href="#/home">Go home</a></Empty></div>;
-  const have = new Set([...pantry.map(p => p.id), ...ASSUMED]);
-  const house = householdCheck(recipe, members);
+  const have = new Set([...pantry.map(p => p.id), ...getCatalog().assumed]);
   const missing = recipe.ingredients.filter(it => !it.optional && !it.options.some(id => have.has(id)));
-  const plates = house.ok ? platesFor(recipe, members) : [];
-  const lastMade = repeatCheck(recipe, log, { date: dayKey(), extra }).lastDays;
+  const house = info.data?.house || { ok: true, notes: [] };
+  const plates = info.data?.plates || [];
+  const lastMade = info.data?.lastDays ?? null;
+  const shareText = info.data?.shareText || recipe.name + ' (' + recipe.time + ' min)';
 
   return (
     <div className="screen recipe">
-      <Header title="" back right={<a className="icon-btn" href={whatsappLink(recipeText(recipe))} target="_blank" rel="noreferrer" aria-label="Share on WhatsApp">⤴</a>} />
+      <Header title="" back right={<a className="icon-btn" href={whatsappLink(shareText)} target="_blank" rel="noreferrer" aria-label="Share on WhatsApp">⤴</a>} />
       <h2 className="recipe-title"><DietDot diet={recipe.diet} /> {recipe.name}</h2>
       {recipe.alt && <p className="dish-alt">{recipe.alt}</p>}
       <div className="meta-row">

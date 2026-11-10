@@ -1,11 +1,27 @@
-import React, { useState } from 'react';
-import { findRescue } from '../../shared/engine.mjs';
+import React, { useEffect, useState } from 'react';
+import { getCatalog } from '../catalog.js';
+import { api } from '../lib.js';
 import { Header } from '../ui.jsx';
+
+// Offline fallback: a simple word search over the fixes kept on the phone.
+const localSearch = q => {
+  const words = q.toLowerCase().split(/W+/).filter(w => w.length > 2);
+  const all = getCatalog().rescues;
+  return words.length ? all.filter(r => words.some(w => (r.title + ' ' + r.keywords).toLowerCase().includes(w))) : all;
+};
 
 export function BachaoList() {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(null);
-  const items = findRescue(q);
+  const [items, setItems] = useState(() => getCatalog().rescues);
+  useEffect(() => {
+    // Python (kitchen/engine.py -> find_rescue) finds the best fixes.
+    let live = true;
+    const timer = setTimeout(() => {
+      api('rescue', { text: q }).then(r => live && setItems(r)).catch(() => live && setItems(localSearch(q)));
+    }, q ? 200 : 0);
+    return () => { live = false; clearTimeout(timer); };
+  }, [q]);
   return (
     <div className="bachao">
       <input className="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Search: salty, burnt, watery, spicy…" aria-label="Search problems" />

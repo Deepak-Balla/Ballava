@@ -1,9 +1,8 @@
 import React, { useMemo } from 'react';
-import { suggest, buyTips, useSoon, daysLeft, defaultExpiry } from '../../shared/engine.mjs';
-import { repeatCheck, goalScore, prepTonight, dayKey, SLOTS, SLOT_LABEL } from '../../shared/planner.mjs';
-import { go } from '../lib.js';
+import { useSoon, daysLeft, defaultExpiry, dayKey, SLOTS, SLOT_LABEL } from '../catalog.js';
+import { go, useBrain } from '../lib.js';
 import { t } from '../i18n.js';
-import { DietDot, ingName, expiryLabel } from '../ui.jsx';
+import { DietDot, ingName, expiryLabel, Thinking } from '../ui.jsx';
 
 const FILTERS = [
   ['veg', 'Veg only'], ['quick', 'Under 20 min'], ['leftover', 'Leftover magic'], ['healthy', 'Diabetic-friendly'], ['vrat', 'Vrat / fasting'],
@@ -77,21 +76,15 @@ function TodayCard({ plan, findRecipe, log, logMeal, notify }) {
   );
 }
 
-export default function Home({ pantry, addToPantry, members, filters, setFilters, ratings, history, log, logMeal, plan, pins, aiRecipes, aiStatus, notify, findRecipe, extraRecipes, hidden, extra, catalog }) {
-  const params = { pantry, members, filters, ratings, extraRecipes, hidden };
+export default function Home({ pantry, addToPantry, members, filters, setFilters, history, log, logMeal, plan, aiRecipes, aiStatus, notify, findRecipe, catalog, family }) {
   const today = dayKey();
-  const { ready, almost } = useMemo(() => {
-    const found = suggest(params);
-    // Push down what the family just ate, and pull up what suits their goals.
-    const rank = list => list.map(r => {
-      const repeat = repeatCheck(r.recipe, log, { date: today, pins, extra });
-      const goal = goalScore(r.recipe, members);
-      return { ...r, repeat, goalWhy: goal.why[0], rank: r.score - repeat.penalty + goal.bonus };
-    }).sort((a, b) => b.rank - a.rank);
-    return { ready: rank(found.ready), almost: rank(found.almost) };
-  }, [pantry, members, filters, ratings, log, pins, extraRecipes, hidden, extra, today]);
-  const tips = useMemo(() => buyTips(params), [pantry, members, filters, ratings, extraRecipes, hidden]);
-  const prep = prepTonight(plan, today, extra);
+  // Python (kitchen/api.py -> home) ranks the dishes: what you have, what's spoiling, recent repeats and family goals.
+  const brain = useBrain('home', { ...family, filters, plan }, pantry.length > 0);
+  const withRecipe = rows => (rows || []).map(r => ({ ...r, recipe: findRecipe(r.recipe) })).filter(r => r.recipe);
+  const ready = useMemo(() => withRecipe(brain.data?.ready), [brain.data, findRecipe]);
+  const almost = useMemo(() => withRecipe(brain.data?.almost), [brain.data, findRecipe]);
+  const tips = brain.data?.tips || [];
+  const prep = brain.data?.prep || [];
   const eveningNudge = new Date().getHours() >= 18 && !log.some(e => e.date === today);
   const soon = useSoon(pantry);
   const saved = history.reduce((n, h) => n + (h.saved?.length || 0), 0);
@@ -160,7 +153,8 @@ export default function Home({ pantry, addToPantry, members, filters, setFilters
       {members.length > 0 && <p className="muted small">Showing dishes that suit everyone in your family ({members.map(m => m.name).join(', ')}).</p>}
 
       <h3 className="section-title">{t('Cook now')} <span className="count">{ready.length}</span></h3>
-      {ready.length === 0 && <p className="muted">Nothing complete yet. Check "Almost there" below, or add more to your kitchen.</p>}
+      <Thinking state={brain}>Finding dishes for you…</Thinking>
+      {brain.data && ready.length === 0 && <p className="muted">Nothing complete yet. Check "Almost there" below, or add more to your kitchen.</p>}
       <div className="dish-list">{ready.slice(0, 12).map(r => <DishCard key={r.recipe.id} r={r} />)}</div>
 
       {tips.length > 0 && (

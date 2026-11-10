@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { SLOTS, SLOT_LABEL, WEEKDAYS, addDays, dayKey, weekdayOf, planWeek, recommend, prepTonight, planGroceries, menuMessage, dayRecipeIds, platesFor } from '../../shared/planner.mjs';
+import { SLOTS, SLOT_LABEL, WEEKDAYS, addDays, dayKey } from '../catalog.js';
 import { Header, DietDot, Empty } from '../ui.jsx';
-import { api, go, whatsappLink } from '../lib.js';
+import { api, brain, go, useBrain, whatsappLink } from '../lib.js';
 import { t, LANGS } from '../i18n.js';
+
+// All the planning happens in Python (kitchen/planner.py). This screen shows the plan and sends taps back.
 
 const dateLabel = (key, today) => {
   if (key === today) return 'Today';
@@ -10,6 +12,8 @@ const dateLabel = (key, today) => {
   const d = new Date(key + 'T12:00:00');
   return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${d.toLocaleString('en', { month: 'short' })}`;
 };
+
+const dayIds = day => (day ? [...SLOTS.map(s => day[s]), ...Object.values(day.tiffins || {}), ...Object.values(day.fast || {})].filter(Boolean) : []);
 
 function Row({ label, recipe, locked, onLock, onSwap, onCooked, cooked }) {
   return (
@@ -27,7 +31,7 @@ function Row({ label, recipe, locked, onLock, onSwap, onCooked, cooked }) {
   );
 }
 
-function FamilyVote({ day, date, params, findRecipe, plan, setPlan, notify, signedIn }) {
+function FamilyVote({ day, date, family, findRecipe, plan, setPlan, notify, signedIn }) {
   const [view, setView] = useState(null);
   const poll = plan[date]?.poll;
   useEffect(() => {
@@ -41,10 +45,11 @@ function FamilyVote({ day, date, params, findRecipe, plan, setPlan, notify, sign
 
   async function start() {
     if (!signedIn) { notify('Please sign in to start a family vote'); return; }
-    const ideas = recommend({ ...params, slot: 'dinner', date, fastingApplies: false }).slice(0, 3);
-    const current = day.dinner && findRecipe(day.dinner);
-    const options = [...(current ? [current] : []), ...ideas.map(r => r.recipe)].filter((r, i, a) => a.findIndex(x => x.id === r.id) === i).slice(0, 3).map(r => ({ id: r.id, name: r.name }));
     try {
+      const { ids } = await brain('recommend', { ...family, slot: 'dinner', date, limit: 3 });
+      const current = day.dinner && findRecipe(day.dinner);
+      const options = [...(current ? [current] : []), ...ids.map(findRecipe).filter(Boolean)]
+        .filter((r, i, a) => a.findIndex(x => x.id === r.id) === i).slice(0, 3).map(r => ({ id: r.id, name: r.name }));
       const { token } = await api('polls', { title: `What should we eat for dinner on ${dateLabel(date, dayKey())}?`, date, slot: 'dinner', options });
       setPlan(p => ({ ...p, [date]: { ...p[date], poll: { token } } }));
     } catch (e) { notify(e.message); }
@@ -74,25 +79,30 @@ function FamilyVote({ day, date, params, findRecipe, plan, setPlan, notify, sign
   );
 }
 
-export default function Plan({ pantry, members, ratings, log, plan, setPlan, pins, setPins, prefs, setPrefs, catalog, extraRecipes, extra, hidden, findRecipe, addToShopping, logMeal, notify, auth }) {
+export default function Plan({ pantry, log, plan, setPlan, pins, setPins, prefs, setPrefs, catalog, family, findRecipe, addToShopping, logMeal, notify, auth }) {
   const today = dayKey();
   const [lang, setMenuLang] = useState(prefs.menuLang || 'hi');
+  const [busy, setBusy] = useState(false);
   const observed = prefs.observed || [];
-  const params = { pantry, members, ratings, log, pins, extraRecipes, hidden, extra };
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(today, i)), [today]);
-  const planned = days.some(d => dayRecipeIds(plan[d]).length > 0);
-  const groceries = useMemo(() => planGroceries(plan, { from: today, pantry, extra }), [plan, today, pantry, extra]);
-  const prep = prepTonight(plan, today, extra);
+  const planned = days.some(d => dayIds(plan[d]).length > 0);
+  // Prep reminders, groceries, the cook's menu and portion tips, all from Python.
+  const info = useBrain('plan-info', { ...family, plan, lang }, planned);
+  const { prep = [], groceries = [], menu = null, plateTips = 0 } = info.data || {};
   const upcoming = catalog.festivals.filter(f => f.date >= today).slice(0, 6);
 
-  function makePlan() {
-    const fresh = planWeek({ ...params, start: today, existing: plan, festivals: catalog.festivals, observed });
-    // Keep the last 60 days so the dashboard and repeat checks have history.
-    const cutoff = addDays(today, -60);
-    const kept = Object.fromEntries(Object.entries(plan).filter(([d]) => d >= cutoff && !fresh[d]));
-    for (const [d, day] of Object.entries(fresh)) if (plan[d]?.poll) day.poll = plan[d].poll;
-    setPlan({ ...kept, ...fresh });
-    notify('Your week is planned. Lock what you like, swap what you don\'t.');
+  async function makePlan() {
+    setBusy(true);
+    try {
+      const { plan: fresh } = await brain('plan', { ...family, start: today, existing: plan, observed });
+      // Keep the last 60 days so the dashboard and repeat checks have history.
+      const cutoff = addDays(today, -60);
+      const kept = Object.fromEntries(Object.entries(plan).filter(([d]) => d >= cutoff && !fresh[d]));
+      for (const [d, day] of Object.entries(fresh)) if (plan[d]?.poll) day.poll = plan[d].poll;
+      setPlan({ ...kept, ...fresh });
+      notify('Your week is planned. Lock what you like, swap what you don\'t.');
+    } catch (e) { notify(e.message); }
+    setBusy(false);
   }
 
   const toggleLock = (date, slot) => setPlan(p => {
@@ -100,12 +110,12 @@ export default function Plan({ pantry, members, ratings, log, plan, setPlan, pin
     return { ...p, [date]: { ...p[date], locked: locked.includes(slot) ? locked.filter(s => s !== slot) : [...locked, slot] } };
   });
 
-  function swap(date, slot) {
-    const week = new Set(days.flatMap(d => dayRecipeIds(plan[d])));
-    const dayLog = [...log, ...days.flatMap(d => SLOTS.filter(s => plan[d]?.[s] && !(d === date && s === slot)).map(s => ({ recipeId: plan[d][s], date: d, slot: s })))];
-    const next = recommend({ ...params, log: dayLog, slot, date, fastingApplies: false }).find(r => !week.has(r.recipe.id));
-    if (!next) { notify('No other dish fits right now'); return; }
-    setPlan(p => ({ ...p, [date]: { ...p[date], [slot]: next.recipe.id, locked: [...new Set([...(p[date].locked || []), slot])] } }));
+  async function swap(date, slot) {
+    try {
+      const { recipeId } = await brain('swap', { ...family, plan, date, slot, start: today });
+      if (!recipeId) { notify('No other dish fits right now'); return; }
+      setPlan(p => ({ ...p, [date]: { ...p[date], [slot]: recipeId, locked: [...new Set([...(p[date].locked || []), slot])] } }));
+    } catch (e) { notify(e.message); }
   }
 
   const cookedToday = (id, slot) => log.some(e => e.recipeId === id && e.date === today && e.slot === slot);
@@ -118,7 +128,7 @@ export default function Plan({ pantry, members, ratings, log, plan, setPlan, pin
   return (
     <div className="screen">
       <Header title={t('Weekly plan')} />
-      <button className="btn primary big" onClick={makePlan}>{planned ? 'Refresh unlocked meals' : t('Plan my week')}</button>
+      <button className="btn primary big" onClick={makePlan} disabled={busy}>{busy ? 'Planning your week…' : planned ? 'Refresh unlocked meals' : t('Plan my week')}</button>
       {!pantry.length && <p className="muted small">Tip: add your kitchen items first, so the plan uses what you already have.</p>}
 
       {prep.length > 0 && (
@@ -145,8 +155,8 @@ export default function Plan({ pantry, members, ratings, log, plan, setPlan, pin
             ))}
             {Object.entries(day.tiffins || {}).map(([who, id]) => <Row key={'t' + who} label={`Tiffin · ${who}`} recipe={findRecipe(id)} />)}
             {Object.entries(day.fast || {}).map(([who, id]) => <Row key={'f' + who} label={`Vrat · ${who}`} recipe={findRecipe(id)} />)}
-            {date === today && SLOTS.some(s => day[s]) && <TodayPlates day={day} members={members} findRecipe={findRecipe} />}
-            <FamilyVote day={day} date={date} params={params} findRecipe={findRecipe} plan={plan} setPlan={setPlan} notify={notify} signedIn={!!auth.user} />
+            {date === today && plateTips > 0 && <p className="muted small">🍽 {plateTips} portion tip{plateTips > 1 ? 's' : ''} today. Open a dish to see who needs what.</p>}
+            <FamilyVote day={day} date={date} family={family} findRecipe={findRecipe} plan={plan} setPlan={setPlan} notify={notify} signedIn={!!auth.user} />
           </section>
         );
       })}
@@ -154,7 +164,7 @@ export default function Plan({ pantry, members, ratings, log, plan, setPlan, pin
       {planned && (
         <div className="card">
           <h3>🛒 Groceries for this plan</h3>
-          {groceries.length === 0 ? <p className="muted">You have everything for this plan.</p> : (
+          {info.loading && !info.data ? <p className="muted">Working out what you need…</p> : groceries.length === 0 ? <p className="muted">You have everything for this plan.</p> : (
             <>
               <p className="muted small">{groceries.slice(0, 8).map(g => g.name).join(', ')}{groceries.length > 8 ? ` and ${groceries.length - 8} more` : ''}</p>
               <button className="btn ghost" onClick={addGroceries}>+ Add {groceries.length} items to shopping list</button>
@@ -163,14 +173,14 @@ export default function Plan({ pantry, members, ratings, log, plan, setPlan, pin
         </div>
       )}
 
-      {plan[today] && (
+      {plan[today] && menu && (
         <div className="card">
           <h3>👩‍🍳 Send today's menu to your cook</h3>
           <div className="row">
             <select value={lang} aria-label="Menu language" onChange={e => { setMenuLang(e.target.value); setPrefs(p => ({ ...p, menuLang: e.target.value })); }}>
               {LANGS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
             </select>
-            <a className="btn whatsapp" href={whatsappLink(menuMessage(plan[today], { lang, members, extra }))} target="_blank" rel="noreferrer">Share on WhatsApp</a>
+            <a className="btn whatsapp" href={whatsappLink(menu)} target="_blank" rel="noreferrer">Share on WhatsApp</a>
           </div>
         </div>
       )}
@@ -203,14 +213,3 @@ export default function Plan({ pantry, members, ratings, log, plan, setPlan, pin
     </div>
   );
 }
-
-function TodayPlates({ day, members, findRecipe }) {
-  const notes = SLOTS.flatMap(s => {
-    const r = day[s] && findRecipe(day[s]);
-    return r ? platesFor(r, members).map(p => ({ ...p, dish: r.name })) : [];
-  });
-  if (!notes.length) return null;
-  return <p className="muted small">🍽 {notes.length} portion tip{notes.length > 1 ? 's' : ''} today. Open a dish to see who needs what.</p>;
-}
-
-export { weekdayOf };

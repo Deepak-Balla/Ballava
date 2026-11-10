@@ -4,198 +4,208 @@
 
 Ballava is a web app that runs in any browser and installs on a phone like a normal app. It:
 
+- **plans the whole week** in one tap, with no repeated dishes, and lets you lock, swap or vote on meals
 - remembers what's in your kitchen and warns you before things spoil
 - suggests dishes from what you already have (103 everyday recipes, mostly Indian)
-- tells you the **one thing to buy** that unlocks the most dishes
+- understands family needs: veg, Jain, no onion or garlic, diabetic, fasting, allergies, spice level, age and health goals
+- **one meal, many plates**: tells you how to adjust one dish for each family member
+- **food diary and dashboard**: logs what you made and spots what's missing, like greens or protein
+- tiffin planner, prep reminders, leftover ideas and fasting days
 - guides you while cooking: big steps, timers, a **pressure-cooker whistle counter**, read-aloud and hands-free voice
 - **Bachao!** mode rescues dishes (too salty, burnt, split kadhi…) and says honestly when food isn't safe
-- understands family needs: veg, Jain, no onion or garlic, diabetic, fasting, allergies, spice level
-- keeps a shopping list you can share on WhatsApp
-- optional **AI Chef**: invents new dishes and reads a photo of your fridge (needs an AI key)
-- **plans the whole week** in one tap, with no repeated dishes, and lets you lock, swap or vote on meals
-- **food diary and dashboard**: logs what you made and spots what's missing, like greens or protein
-- **one meal, many plates**: tells you how to adjust one dish for each family member
-- **tiffin planner, prep reminders, leftover ideas and fasting days**
 - **family accounts**: one shared kitchen, plan and list across phones, by family code
 - **admin portal** at `/admin` for recipes, ingredients, Bachao fixes, announcements and festivals
+- optional **AI Chef**: invents new dishes and reads a photo of your fridge (needs an AI key)
 
-You don't need to be technical to run it. Follow the steps below in order.
+**The app is written in Python (Django).** Only the phone screens are JavaScript (React), because browsers can only run JavaScript.
 
 ---
 
-## 1. The tools, explained simply
+## 1. The tools, explained
 
-Think of the app as a restaurant:
-
-| Part of the restaurant | Tool we use | What it does here | Do you need to install it? |
+| Tool | What it is | What it does in Ballava | Where |
 |---|---|---|---|
-| The **building** everything runs in | **Node.js** | Runs JavaScript on your computer, both our server and our build tools. | **Yes.** This is the only thing to install. |
-| The **menu card** customers see | **HTML** (`public/index.html`) | The basic page skeleton. | No, it's a file. |
-| The **interior decoration** | **CSS** (`src/styles.css`) | Colours, sizes, layout, how it looks on phones. | No, it's a file. |
-| The **waiters** who respond to you | **JavaScript + React** (`src/`) | Every button, screen and list. React builds screens from small reusable pieces ("components"). | Only if you change the app (step 5). |
-| The **kitchen brain / head chef** | **JavaScript** (`shared/`) | The recipe book, ingredient names in Hindi, Telugu and Tamil, the matching logic, and Bachao fixes. Shared by the app, the server and the tests. | No. |
-| The **back office** | **Node.js server** (`server/`) | Sends the app to browsers and answers questions at `/api/...`. Built only from Node's own parts, so nothing to install. | No. |
-| The **packer** who prepares food for delivery | **esbuild** (`build.mjs`) | Bundles all of `src/` into two small files in `dist/` that browsers load quickly. | Only if you change the app. |
-| The **food inspector** | **Node test runner** + **Playwright** (`tests/`) | Checks the brain and server automatically, then opens a real hidden Chrome and clicks through the whole app like a person. | Playwright only for the browser test. |
-| The **guest chef** (optional) | **Claude AI** by Anthropic | Invents new recipes and reads fridge photos. | No, but you need an API key. |
-| **Memory** | The browser's **localStorage** | Your kitchen, family, list and history are saved on *your* phone or computer. No account, no database. | No. |
-| **Phone app wrapper** | **PWA** (`manifest.webmanifest`, `sw.js`) | Lets people "Add to Home screen" and open it offline. | No. |
+| **Python** | The programming language | All the thinking: matching dishes, weekly plans, no-repeat rules, family diets, the dashboard, Ask Ballava | `kitchen/engine.py`, `kitchen/planner.py` |
+| **Django** | Python's most popular web framework | The web server, the API the phone screens call, sign-in, the database layer and the **admin portal** | `config/`, `kitchen/` |
+| **Django admin** | The admin portal that comes with Django | Lets admins add recipes, ingredients, fixes, announcements and festivals, and manage users | `/admin`, set up in `kitchen/admin.py` |
+| **SQLite** | A database stored in one file | Keeps accounts and each family's data | `data/db.sqlite3` (**back this up**) |
+| **pytest** | Python's test runner | Runs over 150 automatic checks | `kitchen/tests/` |
+| **Playwright** | Remote control for a real browser | Opens Chrome and clicks through the whole app like a person | `kitchen/tests/test_e2e_*.py` |
+| **anthropic** | Anthropic's official Python library | Talks to Claude for AI Chef | `kitchen/ai.py` |
+| **WhiteNoise** | A small Django add-on | Serves the phone app's files quickly | `config/settings.py` |
+| **React** (JavaScript) | A library for building screens | Every button and screen on the phone. It asks Python whenever it needs thinking done | `src/` |
+| **Node.js + esbuild** | JavaScript tools | Packs `src/` into `dist/`. **Only needed if you change the screens** | `build.mjs`, `package.json` |
+| **Docker** *(optional)* | Packs the whole app into one "container" | Runs Ballava the same way on any computer or server, with one command | `Dockerfile`, `docker-compose.yml` |
+| **gunicorn** | A production web server for Python | Runs Django inside Docker (and on live servers). Not used on Windows | `Dockerfile` |
+
+**Do you need Docker?** No. On your own computer, plain Python (step 3) is simplest. Docker is handy for putting Ballava online, or for running it exactly the same way everywhere (step 6).
 
 **Words you'll see:**
-- **Terminal** (Mac: "Terminal"; Windows: "Command Prompt" or "PowerShell"): a window where you type commands.
-- **npm**: comes with Node.js. `npm start` means "run the start command written in `package.json`".
-- **localhost:3000**: "this computer, door number 3000". Only you can see it until you put the app online.
-- **API**: a back door where the app asks the server questions, like `/api/chat`.
+- **Terminal**: a window where you type commands. On Windows, use **PowerShell**.
+- **Virtual environment (`.venv`)**: a private folder of Python libraries just for Ballava, so it doesn't clash with other projects.
+- **localhost:8000**: "this computer, door number 8000". Only you can see it until you put the app online.
+- **API**: the back door where the phone screens ask Django questions, like `/api/brain/plan`.
+- **Migration**: Django's instructions for creating or updating database tables. `migrate` applies them.
 
 ---
 
-## 2. Install Node.js (one time, about 5 minutes)
+## 2. Install Python (one time)
 
-1. Go to **https://nodejs.org** and download the **LTS** version (any version 20.12 or newer works).
-2. Install it like any program (Next, Next, Finish).
-3. Open a Terminal and type `node -v`, then press Enter. If you see something like `v22.x.x`, it worked.
+1. Go to **https://www.python.org/downloads/** and install Python **3.12 or newer**. On Windows, tick **"Add python.exe to PATH"**.
+2. Open PowerShell and type `python --version`. You should see something like `Python 3.13.x`.
 
-## 3. Run the app (every time)
+## 3. Run Ballava (without Docker)
 
-1. Unzip the `ballava` folder somewhere easy, such as your Desktop.
-2. Open a Terminal **inside that folder**:
-   - **Windows:** open the folder, click the address bar, type `cmd`, press Enter.
-   - **Mac:** right-click the folder and choose **New Terminal at Folder** (or type `cd ` and drag the folder into Terminal).
-3. Type:
+Open PowerShell **inside the Ballava folder** (in File Explorer, click the address bar, type `powershell`, press Enter).
+
+**First time only:**
+```
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python manage.py migrate
+.venv\Scripts\python manage.py createsuperuser
+```
+- The first line creates the virtual environment, and the second installs Django and the other libraries into it.
+- `migrate` creates the database in `data/db.sqlite3`.
+- `createsuperuser` creates your **admin login**. Use your email as the username. It asks for the password twice and **hides what you type** (that's normal). Admin passwords need at least 12 characters.
+
+**Every time:**
+```
+.venv\Scripts\python manage.py runserver
+```
+Then open **http://localhost:8000** (the app) or **http://localhost:8000/admin** (the admin portal). Press **Ctrl + C** in PowerShell to stop.
+
+> **Tip:** you can "activate" the environment once with `.venv\Scripts\Activate.ps1`, and then just type `python manage.py runserver`. If PowerShell refuses with a "running scripts is disabled" error, keep using the full `.venv\Scripts\python` form shown above.
+
+**Use it on your phone (same Wi-Fi):** run `.venv\Scripts\python manage.py runserver 0.0.0.0:8000`, find your computer's address with `ipconfig` ("IPv4 Address", like `192.168.1.5`), and open `http://192.168.1.5:8000` on your phone. Voice features and "Add to Home screen" need **https**, so they fully work once the app is online.
+
+**First time in the app:** create an account (or tap **Continue without an account**), then tap **Try with a sample kitchen**.
+
+## 4. Admin logins and passwords
+
+- **Create an admin:** `.venv\Scripts\python manage.py createsuperuser`
+- **Forgot an admin password?** `.venv\Scripts\python manage.py changepassword you@example.com` (it asks for the new one twice, hidden). Old passwords can't be looked up, only replaced.
+- **Change it while signed in:** in the admin portal, click **Change password** at the top right.
+- **Stop someone signing in:** in the admin portal, open **Users**, untick **Active**, and save. They are signed out at once.
+
+What the admin portal does:
+- **Recipes:** add new ones, or pick **Start from a built-in recipe** to change an existing one. Every edit starts as a *draft*. Select it in the list and use the actions menu: **Send to review**, then **Publish**. Recipes that break the safety rules (for example "gluten-free" with atta, or meat without a food-safety note) can't be published. Users keep seeing the last published version while you edit.
+- **Hidden recipes**, **Ingredients**, **Rescues** (Bachao fixes), **Announcements**, **Festivals**: changes reach users straight away.
+- **Audit log:** every change, with who made it and when.
+- **Privacy:** admins see accounts only. Family kitchens, diets, health goals and meal diaries are never shown in the portal.
+
+After 5 wrong admin passwords, that login is locked for 15 minutes.
+
+## 5. Test that everything works
+
+```
+.venv\Scripts\python -m pip install -r requirements-dev.txt
+.venv\Scripts\python -m pytest
+```
+This runs **116 checks** in about a minute: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `116 passed`.
+
+**Real-browser checks (about a minute):**
+```
+.venv\Scripts\python -m playwright install chromium
+.venv\Scripts\python -m pytest -m e2e
+```
+This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, vote, and publish a recipe as an admin. Screenshots go to `test-screenshots/`. You should see `36 passed`.
+
+## 6. Run Ballava with Docker (optional)
+
+1. Install **Docker Desktop** from https://www.docker.com/products/docker-desktop/ and start it.
+2. In the Ballava folder:
    ```
-   npm start
+   docker compose up --build
    ```
-4. You'll see **"Ballava is running! Open http://localhost:3000"**. Open that address in Chrome.
-5. To stop: click the Terminal and press **Ctrl + C**.
+   The first build takes a few minutes. Then open **http://localhost:8000**.
+3. Create your admin login (in a second PowerShell window):
+   ```
+   docker compose exec web python manage.py createsuperuser
+   ```
+4. Stop it with **Ctrl + C**, or `docker compose down`.
 
-The app is already built, so `npm start` works without installing anything else.
+Your data lives in a Docker **volume** called `ballava-data`, so it survives restarts and rebuilds. `docker compose down -v` **deletes** it, so be careful with `-v`.
 
-**First time in the app:** create an account (or tap **Continue without an account**), then tap **"Try with a sample kitchen"** to see it working instantly, or **"Add what I have"** and type something like `2 tamatar, pyaz, paneer, leftover rice`.
+What the Docker setup does: it builds the phone screens with Node.js, installs Python and the libraries, then runs Django with **gunicorn** (a production web server) as a normal (non-root) user. It also updates the database tables each time it starts, and checks every 30 seconds that the app is healthy.
 
-### Use it on your phone (same Wi-Fi)
-1. Find your computer's local address: Windows: type `ipconfig` and look for "IPv4 Address", such as `192.168.1.5`. Mac: System Settings → Wi-Fi → Details → IP address.
-2. On your phone's browser, open `http://192.168.1.5:3000` (use your number).
-3. Voice features and "Add to Home screen" need a secure **https** address, so they fully work once the app is online (step 7).
+## 7. Change the app
 
-## 4. Test that everything works
+- **Add or change a recipe:** `kitchen/data/recipes.py` or `recipes_more.py` (the format is explained at the top of the file), or use the admin portal with no code at all. Then run `pytest`. It tells you if a recipe has a typo or a wrong tag.
+- **Add an ingredient or a local name:** `kitchen/data/ingredients.py`, as comma-separated other names.
+- **Add a Bachao fix:** `kitchen/data/rescue.py`.
+- **Change how dishes are chosen:** `kitchen/engine.py` (matching) and `kitchen/planner.py` (weekly plans, no repeats, family goals, dashboard).
+- **Change a screen or colours:** files in `src/` (colours are at the top of `src/styles.css`). This needs **Node.js** (https://nodejs.org, LTS). Once: `npm install`. Then `npm run build` (or `npm run dev` to rebuild every time you save). Refresh the browser to see changes.
+- **Change the database tables:** edit `kitchen/models.py`, then run `python manage.py makemigrations` and `python manage.py migrate`.
 
-**Quick check (about 2 seconds, no install needed):**
-```
-npm test
-```
-This runs **more than 90 automatic checks**. For example: every recipe uses real ingredients, "leftover chawal" isn't mistaken for raw rice, a vegetarian family member never sees chicken, a nut allergy hides dishes that need nuts, the server can't be tricked into showing private files, and AI errors are handled politely. You should see `fail 0` at the end.
-
-**Full browser check (about a minute, one-time install):**
-```
-npm install
-npx playwright install chromium
-npm run build
-npm run test:e2e
-```
-This opens a hidden Chrome on a phone-sized screen and does everything a user would: adds ingredients in Hindi, filters veg dishes, cooks Dal Tadka with the whistle counter and a timer, opens Bachao, finishes with a rating, adds a Jain family member, checks the shopping list's WhatsApp link, and reloads to confirm data is saved. It also fails if any JavaScript error happens. Screenshots are saved in `tests/screenshots/`.
-
-**Test by hand (5 minutes):** see the checklist at the end of this file.
-
-## 5. Change the app (when you want to edit things)
-
-1. One time: `npm install` (downloads React and esbuild into a `node_modules` folder).
-2. Run `npm run dev`. This rebuilds automatically whenever you save a file. Refresh the browser to see changes.
-3. Easy things to change:
-   - **Add a recipe:** `shared/recipes.mjs`. Copy an existing one and follow the format at the top of the file. `|5m` at the end of a step makes a 5-minute timer; `|3w` makes a 3-whistle counter.
-   - **Add an ingredient or local name:** `shared/ingredients.mjs`, as comma-separated other names.
-   - **Add a Bachao fix:** `shared/rescue.mjs`.
-   - **Colours:** the top of `src/styles.css`.
-4. Run `npm test` after every change. It will tell you if a recipe has a typo or a wrong tag (for example, marked "gluten-free" but containing atta).
-5. When done: `npm run build`, then `npm start`.
-
-## 6. Switch on AI Chef (optional)
+## 8. Switch on AI Chef (optional)
 
 1. Create an account at **https://console.anthropic.com**, add billing, and create an **API key**.
-2. In the `ballava` folder, copy `.env.example` to a new file named `.env`.
+2. Copy `.env.example` to a new file named `.env` in the Ballava folder.
 3. Paste your key after `ANTHROPIC_API_KEY=` and save.
-4. Restart: press **Ctrl + C**, then `npm start`. The Terminal now says **AI Chef: ON**.
-5. In the app, tap **✨ AI Chef**: "Create a recipe" or "Scan my fridge".
+4. Restart the server. In the app, tap **✨ AI Chef**: "Create a recipe" or "Scan my fridge".
 
-Keep the key secret: never share the `.env` file or put it in the app's code. The key stays on the server; browsers never see it. Each visitor can make at most 10 AI requests per minute (`AI_RATE_LIMIT` in `.env`), which protects your bill.
+Keep the key secret: never share `.env` or put it in the code. The key stays on the server and browsers never see it. Each family can make at most 10 AI requests per minute (`AI_RATE_LIMIT`). If the AI declines a request for safety reasons, Anthropic automatically retries it on a suitable fallback model.
 
-## 6b. Admin portal and accounts
+## 9. Phone sign-in
 
-**Create your admin login (one time):**
-```
-npm run create-admin -- you@example.com
-```
-It asks you to type a password (at least 12 characters, shown as `*`), twice. Press Enter without typing to get a random one instead, and save it, as it's shown only once. Then open **http://localhost:3000/admin**. **Forgot the password?** Run the same command again to set a new one; the old one can't be recovered. Once signed in, you can also change it from the **Change password** tab. Use an email that isn't a normal user account.
+Phone sign-in needs an SMS service.
+- **To try it on your computer:** add `OTP_DEV_MODE=1` to `.env`, and the code appears on screen instead of by SMS. This is ignored on a live site.
+- **For real SMS:** add your Twilio details to `.env` (see `.env.example`). Sending SMS to India also needs DLT registration.
 
-From the portal you can add and edit recipes (draft, then review, then publish; recipes that break the safety rules can't be published), hide recipes, add ingredients and Bachao fixes, post announcements, keep the festival calendar, and disable users. Admins never see a family's diet or health details.
+## 10. Put it online
 
-**Your data:** accounts and family data live in one file, `data/ballava.db`. **Back this file up.** Users can download or delete their own data from More, Account.
-
-**Phone sign-in** needs an SMS service. To try it without one, add `OTP_DEV_MODE=1` to `.env` and the code appears on screen. For real SMS, add your Twilio details (see `.env.example`). Sending SMS to India also needs DLT registration.
-
-## 7. Put it online (so anyone can use it)
-
-Any host that runs Node.js works, for example Render, Railway, Fly.io, or a small cloud server:
-- **Start command:** `npm start`
-- **Build command:** `npm install && npm run build` (or nothing, since `dist/` is already built)
-- **Environment variables:** add `ANTHROPIC_API_KEY` there if you want AI. Don't upload `.env`.
+Any host that runs Docker or Python works, for example Render, Railway, Fly.io, or a small cloud server.
+- **Easiest:** deploy with the included `Dockerfile`.
+- **Environment variables:** `DJANGO_ALLOWED_HOSTS=yourdomain.com`, `DJANGO_CSRF_TRUSTED_ORIGINS=https://yourdomain.com` and `DJANGO_SECURE=1`. Add `ANTHROPIC_API_KEY` if you want AI Chef. Don't upload `.env`.
+- **Keep your data:** the host must give you a **permanent disk** mounted at `/data` (Docker), or set `DATA_DIR` to one. Without it, accounts vanish on every restart.
+- Check your settings with `python manage.py check --deploy`.
 - Hosts give you an **https** address, so phone install, microphone and offline mode all work.
-- **Keep your data:** the host must give you a permanent disk for `data/ballava.db`, or set `DB_PATH` to a folder on one. Without it, accounts vanish on every restart.
-- Set `NODE_ENV=production`, and don't set `OTP_DEV_MODE` on a live site.
 
-## 8. Project map
+## 11. Project map
 
 ```
 ballava/
-├── README.md            ← this guide
-├── package.json         ← project name + the commands (start, build, dev, test)
-├── .env.example         ← settings template (copy to .env)
-├── build.mjs            ← packs src/ into dist/
-├── dist/                ← the ready-to-serve app (built, don't edit by hand)
-├── public/              ← page skeleton, icons, phone-app settings, offline support
-├── src/                 ← the app screens (React)
-│   ├── App.jsx          ← main frame, saved data, bottom tabs
-│   ├── screens/         ← Home, Pantry (Kitchen), Recipe, Cook, Bachao, Family, Shopping, AiChef
-│   ├── lib.js           ← voice, timers' beep, keep-screen-on, WhatsApp links
-│   └── styles.css       ← all the looks
-├── shared/              ← the cooking brain (used by app, server and tests)
-│   ├── ingredients.mjs  ← 93 ingredients with Hindi/Telugu/Tamil names, shelf life, allergens
-│   ├── recipes.mjs      ← 52 recipes with timers and whistle counts
-│   ├── rescue.mjs       ← Bachao fixes + "is it safe?" rules
-│   └── engine.mjs       ← understanding text, matching dishes, family rules, buy tips
-├── server/
-│   ├── server.mjs       ← web server + API (/api/health, /api/chat, /api/suggest, /api/ai/...)
-│   └── ai.mjs           ← talks to Claude, with food-safety rules built in
-├── scripts/dev.mjs      ← "npm run dev"
-└── tests/               ← automatic checks (engine, server, real browser)
+├── README.md              ← this guide
+├── manage.py              ← Django's command line (runserver, migrate, createsuperuser…)
+├── requirements.txt       ← Python libraries the app needs
+├── requirements-dev.txt   ← extra libraries for testing
+├── .env.example           ← settings template (copy to .env)
+├── Dockerfile, docker-compose.yml, .dockerignore   ← Docker set-up (optional)
+├── config/                ← Django settings and web addresses
+│   ├── settings.py
+│   └── urls.py            ← /admin, /api/…, and the app itself
+├── kitchen/               ← the Ballava Django app (all Python)
+│   ├── data/              ← recipes, ingredients (with Hindi/Telugu/Tamil names), Bachao fixes
+│   ├── engine.py          ← understanding what people type, matching dishes, family rules
+│   ├── planner.py         ← weekly plans, no repeats, goals, plates, tiffins, dashboard, Ask Ballava
+│   ├── api.py, urls.py    ← the API the phone screens call
+│   ├── models.py          ← database tables
+│   ├── admin.py           ← the admin portal
+│   ├── ai.py              ← AI Chef (Claude)
+│   ├── security.py        ← rate limits and phone codes
+│   └── tests/             ← pytest checks and real-browser tests
+├── src/                   ← the phone screens (React, JavaScript)
+├── public/                ← page skeleton, icons, offline support
+├── dist/                  ← the built screens Django serves (made by `npm run build`)
+├── data/                  ← the database and secret key (created when you run it; back it up)
+└── legacy_js/             ← the old JavaScript server, kept for reference (safe to delete)
 ```
 
-## 9. Troubleshooting
+## 12. Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| `node` or `npm` "not recognised" | Install Node.js (step 2), then **close and reopen** the Terminal. |
-| `EADDRINUSE` / port already in use | Ballava is already running in another window, or another program uses port 3000. Close it, or run with another port: Mac/Linux `PORT=4000 npm start`; Windows `set PORT=4000 && npm start`. |
-| "The app is not built yet" | Run `npm install` then `npm run build`. |
-| Page looks old after an update | Refresh hard: **Ctrl + Shift + R** (Mac: **Cmd + Shift + R**). |
-| Microphone button missing | Voice typing needs Chrome or Edge (or Android). Safari on iPhone doesn't support it yet; typing works everywhere. |
+| `python` is "not recognised" | Reinstall Python with **Add python.exe to PATH** ticked, then close and reopen PowerShell. |
+| "Error: That port is already in use" | Ballava is already running in another window. Close it, or use another port: `runserver 8001`. |
+| "No module named django" | You're not using the virtual environment. Use `.venv\Scripts\python …`, or run the install step again. |
+| "no such table" | Run `.venv\Scripts\python manage.py migrate`. |
+| The page says "Loading recipes…" forever | The server isn't running, or the phone can't reach it. Start `runserver` and refresh. |
+| Typing ingredients doesn't work offline | Reading typed words happens on the server. Offline, pick items from the list instead. |
+| Forgot the admin password | `.venv\Scripts\python manage.py changepassword you@example.com` |
 | AI Chef says "switched off" | Check `.env` has `ANTHROPIC_API_KEY=...`, then restart the server. |
-| "The AI key on the server is not valid" | The key was mistyped or deleted. Create a new one in the Anthropic console. |
-| Lost my kitchen list | Data lives in that browser on that device. Clearing browser data or using a different phone starts fresh. |
-
-## 10. Five-minute manual test checklist
-
-- [ ] Open the app → tap **Try with a sample kitchen** → you see "Cook now" dishes.
-- [ ] **Kitchen** tab → type `palak, kodi, mysteryfruit` → spinach and chicken are added, and it says it didn't recognise "mysteryfruit".
-- [ ] Press **−** on an item until it says **Use today** → the **Cook** tab shows a yellow "Use soon" banner.
-- [ ] Tap **Veg only** → no egg or chicken dishes remain.
-- [ ] Open a recipe with missing items → **Add missing to shopping list** → the **List** tab shows them with a badge → **Share on WhatsApp** opens WhatsApp.
-- [ ] Start cooking **Dal Tadka** → tap the whistle button 4 times → it beeps and says to turn off the stove.
-- [ ] Start a timer → it counts down and beeps at zero.
-- [ ] Tap **Bachao!** → search "salty" → read the fixes.
-- [ ] Finish → give stars → the home screen shows **1 meal cooked**.
-- [ ] **Family** → add a Jain vegetarian → onion, egg and chicken dishes disappear.
-- [ ] Close and reopen the browser → everything is still there.
+| Page looks old after an update | Refresh hard: **Ctrl + Shift + R**. |
 
 ---
 
-**Safety notes built into Ballava:** cooked rice and meat warnings on the risky dishes, steaming sprouts, a "when in doubt, throw it out" rescue entry, and AI recipes always come with food-safety rules. Allergy matching is a helper, not a guarantee; always read packaged food labels.
+**Safety notes built into Ballava:** cooked rice and meat warnings on the risky dishes, steaming sprouts, a "when in doubt, throw it out" rescue entry, raw sprouts hidden in pregnancy, and AI recipes always come with food-safety rules. Allergy matching and health goals are helpers, not guarantees or medical advice. Always read packaged food labels and follow your doctor.

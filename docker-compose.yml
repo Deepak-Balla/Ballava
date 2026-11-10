@@ -1,0 +1,20 @@
+# Start Ballava with Docker:     docker compose up --build
+# Stop it:                       docker compose down          (your data stays in the "ballava-data" volume)
+# Create an admin login:         docker compose exec web python manage.py createsuperuser
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DJANGO_DEBUG: "0"
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+    volumes:
+      - ballava-data:/data
+    restart: unless-stopped
+
+volumes:
+  ballava-data:

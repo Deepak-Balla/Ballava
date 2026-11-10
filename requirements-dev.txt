@@ -1,0 +1,5 @@
+# Extra tools for testing.   Install:  pip install -r requirements-dev.txt
+-r requirements.txt
+pytest==9.2.0            # runs the automatic checks
+pytest-django==4.14.0    # lets pytest work with Django
+playwright==1.64.1       # drives a real browser for the end-to-end tests

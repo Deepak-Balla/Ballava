@@ -20,7 +20,7 @@ function copyPublic() {
 }
 
 const options = {
-  entryPoints: { app: 'src/main.jsx', admin: 'src/admin/main.jsx' },
+  entryPoints: { app: 'src/main.jsx' },
   bundle: true,
   outdir: out,
   minify: !watch,

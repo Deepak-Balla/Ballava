@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { parseIngredients } from '../../shared/engine.mjs';
-import { GOALS, AGE_GROUPS, WEEKDAYS } from '../../shared/planner.mjs';
+import { getCatalog, WEEKDAYS } from '../catalog.js';
+import { api } from '../lib.js';
 import { Header, Empty, ingName } from '../ui.jsx';
 import { t } from '../i18n.js';
 
@@ -9,17 +9,21 @@ const blank = { name: '', diet: 'nonveg', jain: false, noOnionGarlic: false, dia
 const toggle = (list, v) => (list.includes(v) ? list.filter(x => x !== v) : [...list, v]);
 
 export default function Family({ members, setMembers, notify }) {
+  const { goals: GOALS, ageGroups: AGE_GROUPS } = getCatalog();
   const [form, setForm] = useState(blank);
   const [editing, setEditing] = useState(null);
   const [likes, setLikes] = useState('');
   const [dislikes, setDislikes] = useState('');
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  function save(e) {
+  async function save(e) {
     e.preventDefault();
     const name = form.name.trim();
     if (!name) { notify('Please enter a name'); return; }
-    const m = { ...form, name, likes: parseIngredients(likes).found, dislikes: parseIngredients(dislikes).found };
+    const parse = async text => (text.trim() ? (await api('parse', { text })).found : []);
+    let liked, disliked;
+    try { [liked, disliked] = await Promise.all([parse(likes), parse(dislikes)]); } catch (err) { notify(err.message); return; }
+    const m = { ...form, name, likes: liked, dislikes: disliked };
     if (editing !== null) setMembers(members.map((x, i) => (i === editing ? m : x)));
     else setMembers([...members, m]);
     notify(editing !== null ? `Updated ${name}` : `Added ${name}. Dishes now suit them too.`);

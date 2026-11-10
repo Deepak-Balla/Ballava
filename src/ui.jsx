@@ -1,7 +1,6 @@
 import React from 'react';
-import { BY_ID } from '../shared/ingredients.mjs';
 
-export const ingName = id => BY_ID[id]?.name || id;
+export { ingName } from './catalog.js';
 
 export function DietDot({ diet }) {
   const label = diet === 'veg' ? 'Vegetarian' : diet === 'egg' ? 'Contains egg' : 'Non-vegetarian';
@@ -35,6 +34,14 @@ export function Header({ title, back, right }) {
 
 export function Empty({ title, children }) {
   return <div className="empty"><h3>{title}</h3>{children}</div>;
+}
+
+// Shown while the Python brain is thinking, or when it couldn't be reached.
+export function Thinking({ state, children = 'Thinking…' }) {
+  if (state.error && !state.data) return <div className="note warn">{state.error.message}</div>;
+  if (state.loading && !state.data) return <p className="muted thinking" role="status">{children}</p>;
+  if (state.data?.offline) return <p className="muted small">You're offline, so this may be out of date.</p>;
+  return null;
 }
 
 export function expiryLabel(days) {

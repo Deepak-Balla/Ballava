@@ -2,8 +2,7 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useHashRoute, go, api } from './lib.js';
 import { useSynced, startSync, rejoin, wipeDevice } from './sync.js';
 import { setLang, t } from './i18n.js';
-import { defaultExpiry, RECIPE_BY_ID, applyCatalog, prepareRecipe } from '../shared/engine.mjs';
-import { dayKey, normalizeLog, slotNow } from '../shared/planner.mjs';
+import { defaultExpiry, dayKey, slotNow, getCatalog, setCatalog as storeCatalog, recipeById, hasCatalog } from './catalog.js';
 import Home from './screens/Home.jsx';
 import Pantry from './screens/Pantry.jsx';
 import Recipe from './screens/Recipe.jsx';
@@ -20,16 +19,6 @@ import Account from './screens/Account.jsx';
 import Login from './screens/Login.jsx';
 import Vote from './screens/Vote.jsx';
 
-const EMPTY_CATALOG = { recipes: [], hidden: [], ingredients: [], rescues: [], announcements: [], festivals: [] };
-
-function cachedCatalog() {
-  try {
-    const c = { ...EMPTY_CATALOG, ...JSON.parse(localStorage.getItem('ballava.catalog') || '{}') };
-    applyCatalog(c);
-    return c;
-  } catch { return EMPTY_CATALOG; }
-}
-
 const isGuest = () => { try { return localStorage.getItem('ballava.guest') === '1'; } catch { return false; } };
 
 export default function App() {
@@ -43,7 +32,8 @@ export default function App() {
   const [plan, setPlan] = useSynced('plan', {});
   const [pins, setPins] = useSynced('pins', []);
   const [prefs, setPrefs] = useSynced('prefs', {});
-  const [catalog, setCatalog] = useState(cachedCatalog);
+  const [catalog, setCatalog] = useState(getCatalog);
+  const [catalogFailed, setCatalogFailed] = useState(false);
   const [toast, setToast] = useState(null);
   const [aiStatus, setAiStatus] = useState({ checked: false, ai: false, server: false });
   const [auth, setAuth] = useState({ checked: false, user: null, household: null });
@@ -63,13 +53,22 @@ export default function App() {
     location.reload();
   }, []);
 
+  // The server said "not signed in" while saving. Double-check before clearing this phone,
+  // so a passing server hiccup never throws away changes that haven't been saved yet.
+  const sessionLost = useCallback(async () => {
+    try {
+      const me = await api('me');
+      if (!me.user) signedOut();
+    } catch { /* can't tell right now: keep everything and try again later */ }
+  }, [signedOut]);
+
   const loadMe = useCallback(async ({ merge = false, rejoined = false } = {}) => {
     const me = await api('me');
     setAuth({ checked: true, user: me.user, household: me.household || null });
     if (!me.user) return;
-    if (rejoined) await rejoin(signedOut);
-    else await startSync({ merge, onLost: signedOut });
-  }, [signedOut]);
+    if (rejoined) await rejoin(sessionLost);
+    else await startSync({ merge, onLost: sessionLost });
+  }, [sessionLost]);
 
   useEffect(() => {
     api('health').then(d => setAiStatus({ checked: true, ai: !!d.ai, server: true }))
@@ -79,13 +78,10 @@ export default function App() {
       let cached = null;
       try { cached = JSON.parse(localStorage.getItem('ballava._user') || 'null'); } catch { /* nothing stored */ }
       setAuth({ checked: true, user: cached, household: null });
-      if (cached) startSync({ onLost: signedOut });
+      if (cached) startSync({ onLost: sessionLost });
     });
-    api('catalog').then(c => {
-      applyCatalog(c);
-      setCatalog(c);
-      try { localStorage.setItem('ballava.catalog', JSON.stringify(c)); } catch { /* keep in memory */ }
-    }).catch(() => {});
+    // The recipe book comes from the Python server, and is kept on the phone for offline use.
+    api('catalog').then(c => { storeCatalog(c); setCatalog(getCatalog()); }).catch(() => setCatalogFailed(true));
   }, [loadMe]);
 
   useEffect(() => {
@@ -99,10 +95,10 @@ export default function App() {
     return r;
   }, [history]);
 
-  const log = useMemo(() => normalizeLog(history), [history]);
-  const extraRecipes = useMemo(() => catalog.recipes.map(r => prepareRecipe({ tags: [], ...r })), [catalog]);
-  const extra = useMemo(() => ({ ...aiRecipes, ...Object.fromEntries(extraRecipes.map(r => [r.id, r])) }), [aiRecipes, extraRecipes]);
-  const hidden = catalog.hidden;
+  // Older diary entries only have a timestamp; give each a day and a meal for display.
+  const log = useMemo(() => history.map(h => ({ ...h, date: h.date || dayKey(h.at), slot: h.slot || slotNow(h.at) })), [history]);
+  // What the family knows, sent along whenever the Python brain is asked something.
+  const family = useMemo(() => ({ pantry, members, history, pins, aiRecipes }), [pantry, members, history, pins, aiRecipes]);
 
   // Returns the ids that were actually new (so messages can be accurate).
   const addToPantry = useCallback((ids) => {
@@ -130,7 +126,7 @@ export default function App() {
     setHistory(h => [...h, { id, recipeId, name, date, slot, at: Date.now(), rating, saved }]);
   }, [setHistory]);
 
-  const findRecipe = id => extra[id] || RECIPE_BY_ID[id];
+  const findRecipe = useCallback(id => recipeById(id) || aiRecipes[id], [aiRecipes, catalog]);
 
   const [screen, param] = route;
   if (screen === 'vote') return <Vote token={param} />;
@@ -140,9 +136,20 @@ export default function App() {
     return <Login onDone={() => loadMe({ merge: true })} onGuest={() => { try { localStorage.setItem('ballava.guest', '1'); } catch { /* ok */ } setGuest(true); }} server={aiStatus.server || !aiStatus.checked} />;
   }
 
+  if (!hasCatalog()) {
+    return (
+      <div className="splash">
+        <div className="center">
+          <span className="brand-mark">B</span>
+          <p className="muted">{catalogFailed ? 'Ballava needs an internet connection the first time it opens. Please connect and refresh.' : 'Loading recipes…'}</p>
+        </div>
+      </div>
+    );
+  }
+
   const ctx = {
     pantry, setPantry, addToPantry, members, setMembers, shopping, setShopping, addToShopping, history, setHistory, log, logMeal, ratings, aiRecipes, setAiRecipes,
-    filters, setFilters, notify, aiStatus, findRecipe, plan, setPlan, pins, setPins, prefs, setPrefs, catalog, extraRecipes, extra, hidden, auth, loadMe, signedOut,
+    filters, setFilters, notify, aiStatus, findRecipe, plan, setPlan, pins, setPins, prefs, setPrefs, catalog, family, auth, loadMe, signedOut,
   };
 
   let body;

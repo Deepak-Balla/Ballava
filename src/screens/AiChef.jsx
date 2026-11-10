@@ -1,6 +1,4 @@
 import React, { useState } from 'react';
-import { BY_ID } from '../../shared/ingredients.mjs';
-import { normalizeAiRecipe } from '../../shared/engine.mjs';
 import { Header, ingName } from '../ui.jsx';
 import { api, go, shrinkImage } from '../lib.js';
 
@@ -35,7 +33,7 @@ export default function AiChef({ aiStatus, pantry, members, aiRecipes, setAiReci
         household: members.map(m => ({ diet: m.diet, jain: m.jain, noOnionGarlic: m.noOnionGarlic, diabetic: m.diabetic, fasting: m.fasting, allergies: m.allergies, spice: m.spice })),
         wish,
       });
-      const recipe = normalizeAiRecipe(data.recipe);
+      const recipe = data.recipe; // already checked and cleaned by Python (engine.normalize_ai_recipe)
       setAiRecipes({ ...aiRecipes, [recipe.id]: recipe });
       go('recipe/' + recipe.id);
     } catch (e) { setError(e.message); }
@@ -77,7 +75,7 @@ export default function AiChef({ aiStatus, pantry, members, aiRecipes, setAiReci
             <div className="chips wrap">
               {scan.found.map(id => (
                 <button key={id} className={'chip' + (pick.has(id) ? ' on' : '')} onClick={() => { const n = new Set(pick); n.has(id) ? n.delete(id) : n.add(id); setPick(n); }}>
-                  {pick.has(id) ? '✓ ' : ''}{BY_ID[id]?.name || id}
+                  {pick.has(id) ? '✓ ' : ''}{ingName(id)}
                 </button>
               ))}
             </div>

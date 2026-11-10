@@ -104,13 +104,51 @@ export function shrinkImage(file, max = 1024) {
   });
 }
 
-// API calls to our own server. The app still works when there is no server.
+// ---- Talking to the Python server (Django). ----
+// Django only accepts changes that carry its CSRF token, which it hands out in a cookie on any API call.
+const csrfToken = () => (document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/) || [])[1];
+
 export async function api(path, body) {
+  if (body && !csrfToken()) await fetch('api/auth/config').catch(() => {});
   const res = await fetch('api/' + path, body ? {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() || '' }, body: JSON.stringify(body),
   } : undefined);
   let data = {};
   try { data = await res.json(); } catch { /* not JSON */ }
   if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status, data });
   return data;
+}
+
+// Asks the Python "brain" (kitchen/planner.py) to think. The last good answer is remembered,
+// so when there's no connection the screen can still show something useful.
+export async function brain(name, body) {
+  const key = 'ballava.brain.' + name;
+  try {
+    const data = await api('brain/' + name, { ...body, tz: new Date().getTimezoneOffset() });
+    try { localStorage.setItem(key, JSON.stringify(data)); } catch { /* storage full */ }
+    return data;
+  } catch (err) {
+    if (err.status) throw err; // the server answered with a real error
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem(key) || 'null'); } catch { /* nothing saved */ }
+    if (cached) return { ...cached, offline: true };
+    throw Object.assign(new Error("You're offline. Connect to the internet and try again."), { offline: true });
+  }
+}
+
+// React hook: re-asks the brain whenever `body` changes. Returns { data, loading, error }.
+export function useBrain(name, body, enabled = true) {
+  const key = JSON.stringify(body);
+  const [state, setState] = useState({ data: null, loading: enabled, error: null });
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let live = true;
+    setState(s => ({ ...s, loading: true }));
+    const timer = setTimeout(() => {
+      brain(name, body).then(data => live && setState({ data, loading: false, error: null }))
+        .catch(error => live && setState(s => ({ ...s, loading: false, error })));
+    }, 150);
+    return () => { live = false; clearTimeout(timer); };
+  }, [name, key, enabled]);
+  return state;
 }
