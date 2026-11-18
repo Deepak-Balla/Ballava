@@ -31,7 +31,8 @@ Ballava is a web app that runs in any browser and installs on a phone like a nor
 | **SQLite** | A database stored in one file | Keeps accounts and each family's data | `data/db.sqlite3` (**back this up**) |
 | **pytest** | Python's test runner | Runs over 150 automatic checks | `kitchen/tests/` |
 | **Playwright** | Remote control for a real browser | Opens Chrome and clicks through the whole app like a person | `kitchen/tests/test_e2e_*.py` |
-| **anthropic** | Anthropic's official Python library | Talks to Claude for AI Chef | `kitchen/ai.py` |
+| **google-genai** | Google's official Python library | Talks to Gemini for AI Chef when `AI_PROVIDER=gemini` | `kitchen/ai.py` |
+| **anthropic** | Anthropic's official Python library | Talks to Claude for AI Chef when `AI_PROVIDER=claude` | `kitchen/ai.py` |
 | **WhiteNoise** | A small Django add-on | Serves the phone app's files quickly | `config/settings.py` |
 | **React** (JavaScript) | A library for building screens | Every button and screen on the phone. It asks Python whenever it needs thinking done | `src/` |
 | **Node.js + esbuild** | JavaScript tools | Packs `src/` into `dist/`. **Only needed if you change the screens** | `build.mjs`, `package.json` |
@@ -102,7 +103,7 @@ After 5 wrong admin passwords, that login is locked for 15 minutes.
 .venv\Scripts\python -m pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest
 ```
-This runs **116 checks** in about a minute: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `116 passed`.
+This runs **127 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `127 passed`. The tests never call a real AI or use your keys.
 
 **Real-browser checks (about a minute):**
 ```
@@ -140,12 +141,25 @@ What the Docker setup does: it builds the phone screens with Node.js, installs P
 
 ## 8. Switch on AI Chef (optional)
 
-1. Create an account at **https://console.anthropic.com**, add billing, and create an **API key**.
-2. Copy `.env.example` to a new file named `.env` in the Ballava folder.
-3. Paste your key after `ANTHROPIC_API_KEY=` and save.
-4. Restart the server. In the app, tap **✨ AI Chef**: "Create a recipe" or "Scan my fridge".
+AI Chef can use either of two AIs. You choose with one line in `.env`, and can switch any time:
 
-Keep the key secret: never share `.env` or put it in the code. The key stays on the server and browsers never see it. Each family can make at most 10 AI requests per minute (`AI_RATE_LIMIT`). If the AI declines a request for safety reasons, Anthropic automatically retries it on a suitable fallback model.
+| `AI_PROVIDER=` | AI | Cost | Key setting | Get a key |
+|---|---|---|---|---|
+| `gemini` | Google Gemini | **Free tier** (daily limits) | `GEMINI_API_KEY` | https://aistudio.google.com/apikey (sign in with a Google account, click **Create API key**) |
+| `claude` | Anthropic Claude | Paid (about a rupee or two per recipe) | `ANTHROPIC_API_KEY` | https://platform.claude.com (add billing, then **API Keys**) |
+
+1. If you don't have a `.env` file yet, copy `.env.example` to a new file named `.env` in the Ballava folder.
+2. In `.env`, set `AI_PROVIDER=gemini` (or `claude`) and paste the key after the matching `..._API_KEY=`. Save.
+3. Restart the server (Docker: `docker compose up -d --force-recreate`). In the app, tap **✨ AI Chef**: "Create a recipe" or "Scan my fridge".
+
+To switch later, change `AI_PROVIDER` and restart. You can keep both keys in `.env`; only the chosen one is used. To pick a different model, set `GEMINI_MODEL` or `ANTHROPIC_MODEL`.
+
+Good to know:
+- **Free tier and privacy:** on Gemini's free tier, Google may use what Ballava sends (kitchen items, and family diet needs like allergies or diabetes) to improve its products. Before real families use your online app, switch to `claude`, or to Gemini's paid tier.
+- **Free limits:** when the day's free Gemini limit is used up, AI Chef says so and the rest of the app keeps working.
+- Keep keys secret: never share `.env` or put keys in the code. Keys stay on the server and browsers never see them.
+- Each family can make at most 10 AI requests per minute (`AI_RATE_LIMIT`).
+- Both AIs get the same safety rules, and their answers go through the same checks. With Claude, if the AI declines a request for safety reasons, Anthropic automatically retries it on a suitable fallback model.
 
 ## 9. Phone sign-in
 
@@ -157,7 +171,7 @@ Phone sign-in needs an SMS service.
 
 Any host that runs Docker or Python works, for example Render, Railway, Fly.io, or a small cloud server.
 - **Easiest:** deploy with the included `Dockerfile`.
-- **Environment variables:** `DJANGO_ALLOWED_HOSTS=yourdomain.com`, `DJANGO_CSRF_TRUSTED_ORIGINS=https://yourdomain.com` and `DJANGO_SECURE=1`. Add `ANTHROPIC_API_KEY` if you want AI Chef. Don't upload `.env`.
+- **Environment variables:** `DJANGO_ALLOWED_HOSTS=yourdomain.com`, `DJANGO_CSRF_TRUSTED_ORIGINS=https://yourdomain.com` and `DJANGO_SECURE=1`. For AI Chef, add `AI_PROVIDER` and its key (`GEMINI_API_KEY` or `ANTHROPIC_API_KEY`) in the host's settings page. Don't upload `.env`.
 - **Keep your data:** the host must give you a **permanent disk** mounted at `/data` (Docker), or set `DATA_DIR` to one. Without it, accounts vanish on every restart.
 - Check your settings with `python manage.py check --deploy`.
 - Hosts give you an **https** address, so phone install, microphone and offline mode all work.
@@ -182,7 +196,7 @@ ballava/
 │   ├── api.py, urls.py    ← the API the phone screens call
 │   ├── models.py          ← database tables
 │   ├── admin.py           ← the admin portal
-│   ├── ai.py              ← AI Chef (Claude)
+│   ├── ai.py              ← AI Chef (Gemini or Claude, chosen by AI_PROVIDER)
 │   ├── security.py        ← rate limits and phone codes
 │   └── tests/             ← pytest checks and real-browser tests
 ├── src/                   ← the phone screens (React, JavaScript)
@@ -203,7 +217,8 @@ ballava/
 | The page says "Loading recipes…" forever | The server isn't running, or the phone can't reach it. Start `runserver` and refresh. |
 | Typing ingredients doesn't work offline | Reading typed words happens on the server. Offline, pick items from the list instead. |
 | Forgot the admin password | `.venv\Scripts\python manage.py changepassword you@example.com` |
-| AI Chef says "switched off" | Check `.env` has `ANTHROPIC_API_KEY=...`, then restart the server. |
+| AI Chef says "switched off" | Check `.env` has `AI_PROVIDER=gemini` with `GEMINI_API_KEY=...` (or `claude` with `ANTHROPIC_API_KEY=...`), then restart the server. |
+| AI Chef says "free AI limit is used up" | Gemini's free daily limit is reached. Wait (it resets daily), or switch to `AI_PROVIDER=claude`. |
 | Page looks old after an update | Refresh hard: **Ctrl + Shift + R**. |
 
 ---

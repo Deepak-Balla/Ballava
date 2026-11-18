@@ -18,7 +18,7 @@ export default function AiChef({ aiStatus, pantry, members, aiRecipes, setAiReci
           <p>Everything else in Ballava works without AI. The AI Chef adds two extras:</p>
           <ul><li>Inventing brand-new dishes from exactly what's in your kitchen</li><li>Reading a photo of your fridge or shelf</li></ul>
           {aiStatus.server
-            ? <p className="muted small">For the app owner: add an <code>ANTHROPIC_API_KEY</code> to the <code>.env</code> file and restart the server. See the guide, step 6.</p>
+            ? <p className="muted small">For the app owner: in the <code>.env</code> file, choose the AI with <code>AI_PROVIDER</code> (gemini or claude), add its key (<code>GEMINI_API_KEY</code> or <code>ANTHROPIC_API_KEY</code>), and restart the server. See the guide, step 8.</p>
             : <p className="muted small">This copy of Ballava is running without its server (for example, as an online demo), so AI features aren't available here.</p>}
         </div>
       </div>

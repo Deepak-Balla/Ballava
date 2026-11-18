@@ -18,6 +18,14 @@ def fresh_catalog():
     engine.apply_catalog()
 
 
+@pytest.fixture(autouse=True)
+def no_real_ai(monkeypatch, settings):
+    """Tests never call a real AI or use your real keys, whatever is in your .env. AI tests plug in fakes."""
+    for name in ('ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'):
+        monkeypatch.delenv(name, raising=False)
+    settings.AI_PROVIDER = 'claude'
+
+
 class Api(Client):
     """A test browser that speaks JSON to /api/."""
 

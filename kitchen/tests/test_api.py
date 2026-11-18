@@ -6,6 +6,8 @@ import anthropic
 import httpx2 as httpx  # the networking library the Anthropic SDK uses
 import pytest
 from django.test import Client
+from google.genai import errors as gemini_errors
+from google.genai import types as gemini_types
 
 from kitchen import ai
 
@@ -156,7 +158,7 @@ def api_error(cls, status):
 def test_ai_says_clearly_when_it_is_off(api, monkeypatch):
     monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
     status, body = api.post_json('ai/invent', {'pantry': ['egg']})
-    assert status == 503 and 'ANTHROPIC_API_KEY' in body['error']
+    assert status == 503 and 'ANTHROPIC_API_KEY' in body['error'] and 'AI_PROVIDER is claude' in body['error']
 
 
 def test_ai_invent_and_scan(api, claude, settings):
@@ -199,3 +201,98 @@ def test_ai_rate_limit_protects_the_bill(api, claude, settings):
     claude(text='{"ingredients": []}')
     statuses = [api.post_json('ai/scan', {'image': 'aGk=', 'mediaType': 'image/png'})[0] for _ in range(4)]
     assert 429 in statuses
+
+
+# ---------------------------------------------------------------- AI Chef with Google Gemini (AI_PROVIDER=gemini)
+class FakeGemini:
+    """Stands in for the Google Gemini client so tests never call the real AI."""
+
+    def __init__(self, text=None, error=None, blocked=False, finish='STOP'):
+        self.calls, self.text, self.error, self.blocked, self.finish = [], text, error, blocked, finish
+        self.models = self
+
+    def generate_content(self, *, model, contents, config):
+        self.calls.append({'model': model, 'contents': contents, 'config': config})
+        if self.error:
+            raise self.error
+        is_scan = len(contents) > 1
+        text = self.text if self.text is not None else (
+            '{"ingredients": ["tomato", "paneer", "dragon fruit"]}' if is_scan else
+            '{"name":"Paneer Pepper Fry","time":20,"spice":2,"ingredients":[{"name":"paneer","quantity":"200 g"}],'
+            '"steps":[{"text":"Fry it","minutes":3}],"why":"Pepper loves paneer"}')
+        return SimpleNamespace(text=text, prompt_feedback=SimpleNamespace(block_reason='SAFETY' if self.blocked else None),
+                               candidates=[SimpleNamespace(finish_reason=self.finish)])
+
+
+@pytest.fixture
+def gemini(monkeypatch, settings):
+    def install(**kw):
+        fake = FakeGemini(**kw)
+        settings.AI_PROVIDER = 'gemini'
+        monkeypatch.setenv('GEMINI_API_KEY', 'test-key')
+        monkeypatch.setattr(ai, '_gemini_client', lambda: fake)
+        return fake
+    return install
+
+
+def test_ai_provider_setting_picks_the_key(api, monkeypatch, settings):
+    monkeypatch.setenv('GEMINI_API_KEY', 'test-key')
+    assert api.get_json('health')[1]['ai'] is False, 'claude is chosen, and it has no key'
+    settings.AI_PROVIDER = 'gemini'
+    assert api.get_json('health')[1]['ai'] is True
+    monkeypatch.delenv('GEMINI_API_KEY')
+    status, body = api.post_json('ai/invent', {'pantry': ['egg']})
+    assert status == 503 and 'GEMINI_API_KEY' in body['error']
+    settings.AI_PROVIDER = 'chatgpt'
+    status, body = api.post_json('ai/invent', {'pantry': ['egg']})
+    assert status == 503 and 'AI_PROVIDER must be claude or gemini' in body['error']
+    assert api.get_json('health')[1]['ai'] is False
+
+
+def test_gemini_invent_and_scan(api, gemini, settings):
+    fake = gemini()
+    status, inv = api.post_json('ai/invent', {'pantry': ['Paneer'], 'household': [{'diet': 'veg'}], 'wish': 'quick'})
+    assert status == 200 and inv['recipe']['name'] == 'Paneer Pepper Fry' and inv['recipe']['ai'] is True
+    call = fake.calls[0]
+    assert call['model'] == settings.GEMINI_MODEL
+    assert 'Food safety' in call['config'].system_instruction and 'Paneer' in call['contents'][0]
+    assert call['config'].response_mime_type == 'application/json'
+    _, scan = api.post_json('ai/scan', {'image': 'aGVsbG8=', 'mediaType': 'image/jpeg'})
+    assert sorted(scan['found']) == ['paneer', 'tomato'] and scan['unknown'] == ['dragon fruit']
+    photo = fake.calls[1]['contents'][0]
+    assert photo.inline_data.data == b'hello' and photo.inline_data.mime_type == 'image/jpeg'
+
+
+def test_real_gemini_client_can_be_built(monkeypatch, settings):
+    from google import genai
+    settings.AI_PROVIDER = 'gemini'
+    monkeypatch.setenv('GEMINI_API_KEY', 'test-key')
+    assert isinstance(ai._gemini_client(), genai.Client)
+
+
+def gemini_error(cls, code, message='error'):
+    return cls(code, {'error': {'code': code, 'message': message, 'status': 'X'}})
+
+
+@pytest.mark.parametrize('error, status, message', [
+    (gemini_error(gemini_errors.ClientError, 400, 'API key not valid. Please pass a valid API key.'), 500, 'not valid'),
+    (gemini_error(gemini_errors.ClientError, 403), 500, 'not valid'),
+    (gemini_error(gemini_errors.ClientError, 404), 500, 'GEMINI_MODEL'),
+    (gemini_error(gemini_errors.ClientError, 429), 503, 'free AI limit'),
+    (gemini_error(gemini_errors.ServerError, 503), 502, 'AI service error (503)'),
+    (httpx.ReadTimeout('slow'), 504, 'too long'),
+    (httpx.ConnectError('offline'), 502, 'Could not reach'),
+])
+def test_gemini_errors_are_reported_politely(api, gemini, error, status, message):
+    gemini(error=error)
+    code, body = api.post_json('ai/invent', {'pantry': ['egg']})
+    assert code == status and message in body['error']
+
+
+def test_gemini_refusal_and_cut_off_answers(api, gemini):
+    gemini(blocked=True)
+    assert "couldn't help" in api.post_json('ai/invent', {'pantry': ['egg']})[1]['error']
+    gemini(text='', finish='SAFETY')
+    assert "couldn't help" in api.post_json('ai/invent', {'pantry': ['egg']})[1]['error']
+    gemini(text='', finish=gemini_types.FinishReason.MAX_TOKENS)
+    assert 'cut short' in api.post_json('ai/invent', {'pantry': ['egg']})[1]['error']

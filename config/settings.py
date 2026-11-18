@@ -145,7 +145,10 @@ LOGGING = {
 }
 
 # ---- Ballava options -------------------------------------------------------
+# Which AI runs AI Chef: "gemini" (Google, has a free tier) or "claude" (Anthropic). See kitchen/ai.py.
+AI_PROVIDER = os.environ.get('AI_PROVIDER', 'claude').strip().lower()
 ANTHROPIC_MODEL = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-5-5')
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash-lite')
 AI_RATE_LIMIT = int(os.environ.get('AI_RATE_LIMIT', '10'))
 SIGNUP_RATE_LIMIT = int(os.environ.get('SIGNUP_RATE_LIMIT', '20'))
 # Phone sign-in: OTP_DEV_MODE=1 shows the code on screen (your own computer only), or set the TWILIO_* values.

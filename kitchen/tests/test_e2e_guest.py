@@ -125,7 +125,7 @@ def test_jain_vegetarian_member_changes_suggestions(page):
 def test_ai_chef_explains_it_is_switched_off(page):
     page.get_by_role('button', name='✨ AI Chef').click()
     page.get_by_text('AI Chef is switched off').wait_for()
-    page.get_by_text(re.compile('ANTHROPIC_API_KEY')).wait_for()
+    page.get_by_text(re.compile('AI_PROVIDER')).wait_for()
 
 
 def test_data_survives_a_reload(page):
