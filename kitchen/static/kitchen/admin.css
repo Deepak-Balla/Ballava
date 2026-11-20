@@ -1,0 +1,170 @@
+/* Ballava's look for the admin portal. Django's admin reads these colour variables everywhere. */
+html[data-theme="light"], :root {
+  --primary: #b4532a; --secondary: #8f3f1e; --accent: #ffd9c2; --primary-fg: #fff;
+  --body-fg: #2b2420; --body-bg: #fbf6f0; --body-quiet-color: #7a6d64; --body-medium-color: #4a3f38; --body-loud-color: #1c1612;
+  --header-color: #fbe9dd; --header-branding-color: #fff; --header-bg: #8f3f1e; --header-link-color: #fff;
+  --breadcrumbs-fg: #7a6d64; --breadcrumbs-link-fg: #a2461f; --breadcrumbs-bg: transparent;
+  --link-fg: #a2461f; --link-hover-color: #6d2e14; --link-selected-fg: #8f3f1e;
+  --hairline-color: #ece2d8; --border-color: #dccbbd;
+  --darkened-bg: #f5ece3; --selected-bg: #f6e3d8; --selected-row: #fff3e6;
+  --button-fg: #fff; --button-bg: #b4532a; --button-hover-bg: #8f3f1e; --default-button-bg: #8f3f1e; --default-button-hover-bg: #b4532a;
+  --object-tools-fg: #fff; --object-tools-bg: #8f3f1e; --object-tools-hover-bg: #b4532a;
+  --message-success-bg: #e3f2e8; --message-warning-bg: #fbefd5; --message-error-bg: #fbe4e1; --message-info-bg: #e8eef8;
+  --b-card: #fff; --b-soft: #f6e3d8; --b-green: #2f7d4f; --b-green-soft: #e3f2e8; --b-amber: #8a5a08; --b-amber-soft: #fbefd5;
+  --b-red: #b3261e; --b-red-soft: #fbe4e1; --b-blue: #2c4f86; --b-blue-soft: #e8eef8;
+  --b-shadow: 0 1px 2px rgba(60, 30, 10, .06), 0 4px 14px rgba(60, 30, 10, .07);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --primary: #d9784a; --secondary: #3a2a21; --accent: #f0b48f; --primary-fg: #fff;
+    --body-fg: #eee3d9; --body-bg: #1b1613; --body-quiet-color: #b3a397; --body-medium-color: #d6c8bc; --body-loud-color: #fff;
+    --header-color: #f0d9c9; --header-branding-color: #fff; --header-bg: #2a1d16; --header-link-color: #fff;
+    --breadcrumbs-fg: #b3a397; --breadcrumbs-link-fg: #f09a6c; --breadcrumbs-bg: transparent;
+    --link-fg: #f09a6c; --link-hover-color: #ffc1a0; --link-selected-fg: #f6b38e;
+    --hairline-color: #34291f; --border-color: #4a3a2f;
+    --darkened-bg: #231c17; --selected-bg: #3a2a21; --selected-row: #3d2a1c;
+    --button-bg: #c4612f; --button-hover-bg: #a24f25; --default-button-bg: #a24f25; --default-button-hover-bg: #c4612f;
+    --object-tools-bg: #5a4a3f; --object-tools-hover-bg: #7a6656;
+    --message-success-bg: #1f3a29; --message-warning-bg: #3d3014; --message-error-bg: #44201c; --message-info-bg: #1d2b40;
+    --b-card: #241d18; --b-soft: #3a2a21; --b-green: #6cc08f; --b-green-soft: #1f3a29; --b-amber: #f0c36b; --b-amber-soft: #3d3014;
+    --b-red: #ff8a80; --b-red-soft: #44201c; --b-blue: #9dbcf0; --b-blue-soft: #1d2b40;
+    --b-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 14px rgba(0, 0, 0, .3);
+  }
+}
+html[data-theme="dark"] {
+  --primary: #d9784a; --secondary: #3a2a21; --accent: #f0b48f; --primary-fg: #fff;
+  --body-fg: #eee3d9; --body-bg: #1b1613; --body-quiet-color: #b3a397; --body-medium-color: #d6c8bc; --body-loud-color: #fff;
+  --header-color: #f0d9c9; --header-branding-color: #fff; --header-bg: #2a1d16; --header-link-color: #fff;
+  --breadcrumbs-fg: #b3a397; --breadcrumbs-link-fg: #f09a6c; --breadcrumbs-bg: transparent;
+  --link-fg: #f09a6c; --link-hover-color: #ffc1a0; --link-selected-fg: #f6b38e;
+  --hairline-color: #34291f; --border-color: #4a3a2f;
+  --darkened-bg: #231c17; --selected-bg: #3a2a21; --selected-row: #3d2a1c;
+  --button-bg: #c4612f; --button-hover-bg: #a24f25; --default-button-bg: #a24f25; --default-button-hover-bg: #c4612f;
+  --object-tools-bg: #5a4a3f; --object-tools-hover-bg: #7a6656;
+  --message-success-bg: #1f3a29; --message-warning-bg: #3d3014; --message-error-bg: #44201c; --message-info-bg: #1d2b40;
+  --b-card: #241d18; --b-soft: #3a2a21; --b-green: #6cc08f; --b-green-soft: #1f3a29; --b-amber: #f0c36b; --b-amber-soft: #3d3014;
+  --b-red: #ff8a80; --b-red-soft: #44201c; --b-blue: #9dbcf0; --b-blue-soft: #1d2b40;
+  --b-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 14px rgba(0, 0, 0, .3);
+}
+
+body { background: var(--body-bg); }
+
+/* Header */
+#header { background: linear-gradient(120deg, var(--header-bg), var(--primary)); padding: 12px 24px; }
+#branding #site-name a.ballava-brand { display: inline-flex; align-items: center; gap: 10px; color: #fff; font-family: Georgia, 'Times New Roman', serif; font-weight: 700; font-size: 1.35rem; text-decoration: none; }
+#branding #site-name small { font-family: system-ui, sans-serif; font-weight: 500; font-size: .8rem; opacity: .85; letter-spacing: .5px; text-transform: uppercase; margin-left: 2px; }
+.ballava-mark { width: 34px; height: 34px; border-radius: 10px; display: inline-grid; place-items: center; background: #fff; color: #b4532a; font-size: 1.1rem; }
+#user-tools { color: #fbe9dd; }
+#user-tools a, #logout-form button { color: #fff; border-bottom: 0; }
+
+/* Section bar */
+.ballava-nav { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 24px; background: var(--darkened-bg); border-bottom: 1px solid var(--hairline-color); }
+.ballava-nav a { padding: 7px 12px; border-radius: 999px; color: var(--body-medium-color); text-decoration: none; font-weight: 600; font-size: .85rem; background: var(--b-card); box-shadow: var(--b-shadow); }
+.ballava-nav a:hover { color: var(--link-hover-color); }
+.ballava-nav a.on { background: var(--primary); color: #fff; }
+div.breadcrumbs { padding: 10px 24px 0; font-size: .85rem; }
+
+/* Rounder, softer modules and lists */
+#content { padding: 16px 24px 32px; }
+#content h1 { font-family: Georgia, 'Times New Roman', serif; color: var(--body-loud-color); }
+.module, .inline-group, #changelist-filter, .dashboard .module { border-radius: 14px; box-shadow: var(--b-shadow); overflow: hidden; border: 0; background: var(--b-card); }
+.module h2, .module caption, .inline-group h2 { background: var(--secondary); border-radius: 0; }
+#changelist .results { border-radius: 12px; box-shadow: var(--b-shadow); }
+#changelist table thead th { background: var(--b-soft); color: var(--body-fg); }
+.button, input[type=submit], input[type=button], .submit-row input, a.button { border-radius: 10px; }
+.submit-row { border-radius: 12px; }
+ul.messagelist li { border-radius: 10px; margin: 6px 24px 0; }
+.object-tools a { border-radius: 999px; }
+#nav-sidebar { background: var(--body-bg); }
+#nav-sidebar .module { box-shadow: none; }
+
+/* ---------- Dashboard */
+.b-hello { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.b-hello h2 { font-family: Georgia, 'Times New Roman', serif; font-size: 1.5rem; margin: 0; color: var(--body-loud-color); background: none; padding: 0; }
+.b-hello p { margin: 2px 0 0; color: var(--body-quiet-color); }
+.b-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.b-stat { background: var(--b-card); border-radius: 14px; box-shadow: var(--b-shadow); padding: 14px; display: grid; gap: 2px; }
+.b-stat .ico { font-size: 1.3rem; }
+.b-stat b { font-size: 1.7rem; color: var(--primary); line-height: 1.1; }
+.b-stat span { color: var(--body-quiet-color); font-size: .85rem; }
+.b-stat.warn b { color: var(--b-amber); }
+.b-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.b-actions a { display: inline-flex; gap: 6px; align-items: center; padding: 10px 14px; border-radius: 12px; background: var(--b-card); box-shadow: var(--b-shadow); font-weight: 600; text-decoration: none; color: var(--body-fg); }
+.b-actions a.primary { background: var(--primary); color: #fff; }
+.b-actions a:hover { transform: translateY(-1px); }
+.b-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.b-card { background: var(--b-card); border-radius: 14px; box-shadow: var(--b-shadow); padding: 16px; }
+.b-card h3 { margin: 0 0 10px; font-size: 1rem; color: var(--body-loud-color); }
+.b-card ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.b-card li { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; border-bottom: 1px solid var(--hairline-color); padding-bottom: 6px; }
+.b-card li:last-child { border-bottom: 0; }
+.b-muted { color: var(--body-quiet-color); font-size: .85rem; }
+.b-empty { color: var(--body-quiet-color); }
+.b-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; align-items: end; height: 120px; }
+.b-bar { display: grid; grid-template-rows: auto 1fr auto; height: 100%; text-align: center; gap: 3px; font-size: .72rem; color: var(--body-quiet-color); }
+.b-bar .track { display: flex; align-items: flex-end; background: var(--darkened-bg); border-radius: 8px; overflow: hidden; }
+.b-bar .fill { width: 100%; background: linear-gradient(180deg, #e8955f, var(--primary)); border-radius: 8px 8px 0 0; }
+.b-split { display: flex; flex-wrap: wrap; gap: 6px; }
+.b-manage { margin-top: 8px; }
+.b-manage > h2 { font-family: Georgia, 'Times New Roman', serif; font-size: 1.15rem; margin: 6px 0 10px; background: none; color: var(--body-loud-color); padding: 0; }
+
+/* ---------- Badges */
+.b-badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: .75rem; font-weight: 700; background: var(--darkened-bg); color: var(--body-medium-color); white-space: nowrap; }
+.b-badge.builtin { background: var(--b-blue-soft); color: var(--b-blue); }
+.b-badge.edited { background: var(--b-amber-soft); color: var(--b-amber); }
+.b-badge.custom { background: var(--b-soft); color: var(--link-fg); }
+.b-badge.live { background: var(--b-green-soft); color: var(--b-green); }
+.b-badge.hidden, .b-badge.draft { background: var(--b-red-soft); color: var(--b-red); }
+.b-badge.review { background: var(--b-amber-soft); color: var(--b-amber); }
+.diet { display: inline-block; width: 13px; height: 13px; border: 2px solid; border-radius: 3px; position: relative; vertical-align: -1px; }
+.diet::after { content: ''; position: absolute; inset: 2px; border-radius: 50%; background: currentColor; }
+.diet.veg { color: #1f8f4e; } .diet.egg { color: #c48a0a; } .diet.nonveg { color: #c0392b; }
+
+/* ---------- Recipe book & ingredients */
+.b-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: var(--b-card); padding: 12px; border-radius: 14px; box-shadow: var(--b-shadow); margin-bottom: 14px; }
+.b-filters input[type=search] { flex: 1 1 220px; min-width: 0; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border-color); background: var(--body-bg); color: var(--body-fg); }
+.b-filters select { padding: 8px; border-radius: 10px; border: 1px solid var(--border-color); background: var(--body-bg); color: var(--body-fg); }
+.b-filters .b-reset { margin-left: auto; }
+.b-counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.b-table-wrap { overflow-x: auto; border-radius: 14px; box-shadow: var(--b-shadow); background: var(--b-card); }
+table.b-table { width: 100%; border-collapse: collapse; }
+table.b-table th { background: var(--b-soft); color: var(--body-fg); text-align: left; font-size: .78rem; text-transform: uppercase; letter-spacing: .3px; padding: 10px; white-space: nowrap; }
+table.b-table td { padding: 10px; border-bottom: 1px solid var(--hairline-color); vertical-align: top; }
+table.b-table tr:hover td { background: var(--selected-row); }
+table.b-table td.num, table.b-table th.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.b-name { font-weight: 700; font-size: .95rem; }
+.b-sub { color: var(--body-quiet-color); font-size: .8rem; }
+
+/* ---------- Recipe detail */
+.b-detail-head { display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 14px; }
+.b-detail-head h2 { font-family: Georgia, 'Times New Roman', serif; font-size: 1.7rem; margin: 0; background: none; color: var(--body-loud-color); padding: 0; display: flex; gap: 8px; align-items: center; }
+.b-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.b-fact { background: var(--darkened-bg); border-radius: 10px; padding: 8px 10px; }
+.b-fact span { display: block; font-size: .72rem; text-transform: uppercase; color: var(--body-quiet-color); letter-spacing: .3px; }
+.b-fact b { font-size: .95rem; }
+.b-nutri { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; }
+.b-nutri div { border-radius: 10px; padding: 10px; text-align: center; background: var(--darkened-bg); }
+.b-nutri b { display: block; font-size: 1.3rem; color: var(--primary); }
+.b-nutri span { font-size: .75rem; color: var(--body-quiet-color); }
+.b-steps { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
+.b-pill { display: inline-block; margin-left: 6px; font-size: .75rem; padding: 1px 8px; border-radius: 999px; background: var(--b-soft); color: var(--link-fg); }
+.b-note { border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.b-note.warn { background: var(--b-amber-soft); } .b-note.bad { background: var(--b-red-soft); } .b-note.info { background: var(--b-blue-soft); }
+.b-problems { color: var(--b-red); }
+
+/* Django underlines links with a very specific rule (a:not(...)); these are buttons and pills, not links in text. */
+.ballava-nav a, .b-actions a, .b-filters a, a.b-name { text-decoration: none !important; }
+a.b-name:hover, a.b-name:focus { text-decoration: underline !important; }
+/* Django fixes the dashboard at 600px wide; use the room. */
+.dashboard #content { width: auto; max-width: 1240px; }
+/* Django gives selects and inputs a fixed height; let the filter bar size them to the text. */
+#container .b-filters select, #container .b-filters input[type=search] { height: auto; min-height: 40px; line-height: 1.3; box-sizing: border-box; }
+#container .b-filters input[type=submit] { min-height: 40px; padding: 8px 18px; }
+
+@media (max-width: 767px) {
+  #header { padding: 10px 14px; }
+  .ballava-nav { padding: 8px 14px; overflow-x: auto; flex-wrap: nowrap; }
+  .ballava-nav a { white-space: nowrap; }
+  #content { padding: 12px 14px 28px; }
+  div.breadcrumbs { padding: 8px 14px 0; }
+}

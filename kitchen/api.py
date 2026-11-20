@@ -20,7 +20,7 @@ from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 
-from . import ai, catalog, engine, planner
+from . import ai, assistant, catalog, engine, planner
 from .models import AiUsage, FamilyData, Household, Poll, Profile, Vote
 from .security import ApiError, auth_config, check_code, clear_limit, client_ip, limited, request_code
 
@@ -362,6 +362,10 @@ def context(body):
         tz = planner.INDIA
     history = [h for h in _list(body.get('history')) if isinstance(h, dict) and (h.get('date') or h.get('at'))]
     ratings = {}
+    # A saved (hearted) dish counts like a 4-star rating until the family rates it, so it comes up a little more often.
+    for s in _list(body.get('savedDishes')):
+        if isinstance(s, dict) and isinstance(s.get('id'), str):
+            ratings[s['id']] = 4
     for h in history:
         if h.get('rating') and h.get('recipeId'):
             ratings[h['recipeId']] = h['rating']
@@ -509,7 +513,8 @@ def dashboard_view(request, body):
 @endpoint(limit=STATE)
 def ask(request, body):
     ctx = context(body)
-    return planner.assistant_reply(str(body.get('text') or '')[:500], plan=_dict(body.get('plan')), **ctx)
+    current = planner.lookup(str(body.get('recipeId') or ''), ctx['extra']) if body.get('recipeId') else None
+    return planner.assistant_reply(str(body.get('text') or '')[:500], plan=_dict(body.get('plan')), current=current, **ctx)
 
 
 # ---------------------------------------------------------------- AI Chef
@@ -526,11 +531,50 @@ def _ai_allowed(request):
 @endpoint()
 def ai_invent(request, body):
     _ai_allowed(request)
-    raw = ai.invent_recipe(pantry=_list(body.get('pantry')), household=_list(body.get('household')), wish=body.get('wish') or '')
+    household = [m for m in _list(body.get('household')) if isinstance(m, dict)]
+    args = dict(pantry=_list(body.get('pantry')), household=household, wish=body.get('wish') or '', meal=body.get('meal'))
+    avoid = None
+    for _attempt in range(2):  # if the first idea breaks a family rule, ask once more, saying why
+        raw = ai.invent_recipe(**args, avoid=avoid)
+        try:
+            recipe = engine.normalize_ai_recipe(raw)
+        except ValueError as err:
+            raise ApiError(502, f'{err}. Please try again.') from err
+        house = engine.household_check(recipe, [{**m, 'fasting': False} for m in household])
+        if house['ok']:
+            return {'recipe': recipe}
+        avoid = house['reason']
+    raise ApiError(502, f"The AI's idea didn't suit your family ({avoid}). Please try again, or add a wish like \"vegetarian\".")
+
+
+@endpoint(limit=STATE)
+def ai_chat(request, body):
+    """The kitchen assistant on every screen. Uses the AI when it's on, and the built-in brain otherwise
+    (or when the AI is busy), so there is always an answer."""
+    question = str(body.get('text') or '').strip()[:1000]
+    if not question:
+        raise ApiError(400, 'Please type a question.')
+    ctx = context(body)
+    current = planner.lookup(str(body.get('recipeId') or ''), ctx['extra']) if body.get('recipeId') else None
+
+    def built_in(note=None):
+        r = planner.assistant_reply(question, plan=_dict(body.get('plan')), current=current, **ctx)
+        return {'reply': r['reply'], 'dishes': r.get('dishes', []), 'recipe': None, 'shopping': [], 'source': 'builtin', 'note': note}
+
+    if not ai.ai_key():
+        return built_in()
     try:
-        return {'recipe': engine.normalize_ai_recipe(raw)}
-    except ValueError as err:
-        raise ApiError(502, f'{err}. Please try again.') from err
+        _ai_allowed(request)
+    except ApiError as err:
+        return built_in(err.message)
+    history = [('assistant' if m.get('from') == 'bot' else 'user', str(m.get('text') or '')[:1500])
+               for m in _list(body.get('messages'))[-8:] if isinstance(m, dict) and m.get('text')]
+    try:
+        data = ai.chat(question, assistant.context_text(ctx, body, current), history)
+    except ApiError as err:
+        log.warning('AI chat fell back to the built-in answers: %s', err.message)
+        return built_in(err.message)
+    return assistant.clean_reply(data, ctx, current)
 
 
 @endpoint(limit=PHOTO)

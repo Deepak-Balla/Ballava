@@ -377,6 +377,15 @@ def test_admin_publishes_a_recipe_and_users_see_it(page, device, site):
     page.reload()
     page.get_by_text('Navratri recipes are here!').wait_for()
 
+    p.goto(site + 'admin/recipe-book/?q=pappu')
+    p.locator('#recipe-book').get_by_role('link', name='Admin Test Pappu').click()
+    p.get_by_text(re.compile('Nutrition per serving')).wait_for()
+    snap(p, '33-admin-recipe-detail')
+    p.goto(site + 'admin/recipe-book/')
+    p.locator('#recipe-book').get_by_role('link', name='Kanda Poha').wait_for()
+    snap(p, '34-admin-recipe-book')
+    no_sideways_scroll(p, 'admin recipe book')
+
     p.goto(site + 'admin/auth/user/')
     p.get_by_role('link', name='Asha').wait_for()
     snap(p, '32-admin-users')
@@ -386,7 +395,7 @@ def test_admin_publishes_a_recipe_and_users_see_it(page, device, site):
 
 
 def test_every_screen_fits_a_phone(page, site):
-    for route in ['home', 'plan', 'track', 'pantry', 'list', 'more', 'family', 'bachao', 'ask', 'account', 'ai', 'recipe/dal_tadka']:
+    for route in ['home', 'plan', 'track', 'pantry', 'list', 'more', 'family', 'bachao', 'ask', 'account', 'ai', 'recipe/dal_tadka', 'saved']:
         page.goto(f'{site}#/{route}')
         page.wait_for_timeout(150)
         no_sideways_scroll(page, route)

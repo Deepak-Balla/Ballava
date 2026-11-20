@@ -90,6 +90,9 @@ Then open **http://localhost:8000** (the app) or **http://localhost:8000/admin**
 - **Stop someone signing in:** in the admin portal, open **Users**, untick **Active**, and save. They are signed out at once.
 
 What the admin portal does:
+- **Dashboard:** numbers at a glance, quick actions, recipes waiting for review, recent changes, and AI use for the last 7 days. The bar under the header jumps to every section.
+- **Recipe book:** *every* recipe in one list, including the 103 built-in ones that live in the code, with search, filters (meal, diet, built-in or added, live, hidden or draft) and calories per serving. Click a dish to see everything about it: ingredients with grams and calories for each line, steps, allergens, Jain and onion/garlic checks. From there, **Edit** (for a built-in dish this starts your own copy), **Hide from users**, or **Open in the app**.
+- **Ingredients:** every ingredient with calories, protein, carbs, fat and fibre per 100 g, what a cup or piece weighs, and how many recipes use it. When you add an ingredient, fill in its nutrition so recipes count its calories.
 - **Recipes:** add new ones, or pick **Start from a built-in recipe** to change an existing one. Every edit starts as a *draft*. Select it in the list and use the actions menu: **Send to review**, then **Publish**. Recipes that break the safety rules (for example "gluten-free" with atta, or meat without a food-safety note) can't be published. Users keep seeing the last published version while you edit.
 - **Hidden recipes**, **Ingredients**, **Rescues** (Bachao fixes), **Announcements**, **Festivals**: changes reach users straight away.
 - **Audit log:** every change, with who made it and when.
@@ -103,14 +106,14 @@ After 5 wrong admin passwords, that login is locked for 15 minutes.
 .venv\Scripts\python -m pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest
 ```
-This runs **127 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `127 passed`. The tests never call a real AI or use your keys.
+This runs **169 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `169 passed`. The tests never call a real AI or use your keys.
 
 **Real-browser checks (about a minute):**
 ```
 .venv\Scripts\python -m playwright install chromium
 .venv\Scripts\python -m pytest -m e2e
 ```
-This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, vote, and publish a recipe as an admin. Screenshots go to `test-screenshots/`. You should see `36 passed`.
+This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, vote, and publish a recipe as an admin. Screenshots go to `test-screenshots/`. You should see `39 passed`.
 
 ## 6. Run Ballava with Docker (optional)
 
@@ -133,15 +136,22 @@ What the Docker setup does: it builds the phone screens with Node.js, installs P
 ## 7. Change the app
 
 - **Add or change a recipe:** `kitchen/data/recipes.py` or `recipes_more.py` (the format is explained at the top of the file), or use the admin portal with no code at all. Then run `pytest`. It tells you if a recipe has a typo or a wrong tag.
-- **Add an ingredient or a local name:** `kitchen/data/ingredients.py`, as comma-separated other names.
+- **Add an ingredient or a local name:** `kitchen/data/ingredients.py`, as comma-separated other names. Give every new ingredient a row in `kitchen/data/nutrition.py` too (calories per 100 g and what a cup or piece weighs); a test checks that none are missing.
 - **Add a Bachao fix:** `kitchen/data/rescue.py`.
 - **Change how dishes are chosen:** `kitchen/engine.py` (matching) and `kitchen/planner.py` (weekly plans, no repeats, family goals, dashboard).
 - **Change a screen or colours:** files in `src/` (colours are at the top of `src/styles.css`). This needs **Node.js** (https://nodejs.org, LTS). Once: `npm install`. Then `npm run build` (or `npm run dev` to rebuild every time you save). Refresh the browser to see changes.
 - **Change the database tables:** edit `kitchen/models.py`, then run `python manage.py makemigrations` and `python manage.py migrate`.
 
-## 8. Switch on AI Chef (optional)
+## 8. Switch on AI (optional)
 
-AI Chef can use either of two AIs. You choose with one line in `.env`, and can switch any time:
+**What AI adds:**
+- **The assistant (✨ Ask, on every screen):** a chat that knows your kitchen, your family's needs (without their names), recent meals, the plan, your saved dishes and the whole recipe book with calories. Ask what to cook, calories, swaps, kid-friendly versions, tiffin ideas or how to fix a dish. It can suggest real dishes (tap to open), invent a new one, add items to your shopping list, and read a fridge photo (📷). It also knows which screen and recipe you're on.
+- **AI Chef:** invents a dish for a chosen meal from what's in your kitchen, and scans fridge photos.
+- Every AI answer is checked before you see it: only real recipes are linked, and a new recipe that breaks a family rule (diet, Jain, allergies, diabetes) is never shown. Diet and allergens of AI recipes are worked out from the ingredients, not just from what the AI claims, and calories are counted by Ballava when it knows the ingredients.
+
+**Without AI** (or when the free limit is used up), the assistant still answers simple questions on its own: what to cook, tiffin ideas, the plan, calories of any dish or ingredient, protein-rich or light ideas, and fixes for common mistakes.
+
+AI can use either of two providers. You choose with one line in `.env`, and can switch any time:
 
 | `AI_PROVIDER=` | AI | Cost | Key setting | Get a key |
 |---|---|---|---|---|
@@ -190,9 +200,12 @@ ballava/
 │   ├── settings.py
 │   └── urls.py            ← /admin, /api/…, and the app itself
 ├── kitchen/               ← the Ballava Django app (all Python)
-│   ├── data/              ← recipes, ingredients (with Hindi/Telugu/Tamil names), Bachao fixes
+│   ├── data/              ← recipes, ingredients (with Hindi/Telugu/Tamil names), nutrition per 100 g, Bachao fixes
+│   ├── templates/, static/ ← the admin portal's look, dashboard, recipe book and ingredient pages
 │   ├── engine.py          ← understanding what people type, matching dishes, family rules
-│   ├── planner.py         ← weekly plans, no repeats, goals, plates, tiffins, dashboard, Ask Ballava
+│   ├── planner.py         ← weekly plans, no repeats, goals, plates, tiffins, dashboard, built-in Ask Ballava answers
+│   ├── nutrition.py       ← calories: turns "1/2 cup", "2 cloves" into grams, then kcal per serving
+│   ├── assistant.py       ← what the AI assistant is told about the family, and the checks on its answers
 │   ├── api.py, urls.py    ← the API the phone screens call
 │   ├── models.py          ← database tables
 │   ├── admin.py           ← the admin portal
@@ -220,6 +233,7 @@ ballava/
 | AI Chef says "switched off" | Check `.env` has `AI_PROVIDER=gemini` with `GEMINI_API_KEY=...` (or `claude` with `ANTHROPIC_API_KEY=...`), then restart the server. |
 | AI Chef says "free AI limit is used up" | Gemini's free daily limit is reached. Wait (it resets daily), or switch to `AI_PROVIDER=claude`. |
 | Page looks old after an update | Refresh hard: **Ctrl + Shift + R**. |
+| "no such column" after an update | Run `.venv\Scripts\python manage.py migrate` (Docker does this by itself when it starts). |
 
 ---
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { getCatalog, daysLeft, useSoon } from '../catalog.js';
+import { getCatalog, daysLeft, useSoon, ingredient } from '../catalog.js';
 import { Header, ingName, expiryLabel } from '../ui.jsx';
 import { SpeechRec, listenOnce, api } from '../lib.js';
 
@@ -75,7 +75,11 @@ export default function Pantry({ pantry, setPantry, addToPantry, notify }) {
           const lab = expiryLabel(d);
           return (
             <li key={p.id} className={soonIds.has(p.id) ? 'soon' : ''}>
-              <span className="p-name">{ingName(p.id)}</span>
+              <span className="p-name">{ingName(p.id)}
+                {ingredient(p.id)?.nutrition?.kcal != null && (
+                  <span className="p-kcal" title="Approximate, per 100 g">{Math.round(ingredient(p.id).nutrition.kcal)} kcal · {ingredient(p.id).nutrition.protein} g protein /100 g</span>
+                )}
+              </span>
               <span className={'p-exp ' + lab.cls}>{lab.text}</span>
               {d !== null && (
                 <span className="p-adjust">
@@ -102,7 +106,8 @@ export default function Pantry({ pantry, setPantry, addToPantry, notify }) {
       </div>
       <div className="chips wrap">
         {INGREDIENTS.filter(i => i.category === cat && !ASSUMED.includes(i.id)).map(i => (
-          <button key={i.id} className={'chip ing' + (have.has(i.id) ? ' on' : '')} aria-pressed={have.has(i.id)} onClick={() => toggle(i.id)}>
+          <button key={i.id} className={'chip ing' + (have.has(i.id) ? ' on' : '')} aria-pressed={have.has(i.id)} onClick={() => toggle(i.id)}
+            title={i.nutrition ? `About ${Math.round(i.nutrition.kcal)} kcal per 100 g` : undefined}>
             {have.has(i.id) ? '✓ ' : '+ '}{i.name}
           </button>
         ))}

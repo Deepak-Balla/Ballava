@@ -39,5 +39,6 @@ urlpatterns = [
     # AI Chef
     path('ai/invent', api.ai_invent),
     path('ai/scan', api.ai_scan),
+    path('ai/chat', api.ai_chat),
     re_path(r'^.*$', lambda request: JsonResponse({'error': 'Unknown API route'}, status=404)),
 ]

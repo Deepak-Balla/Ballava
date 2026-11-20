@@ -241,8 +241,25 @@ def test_ask_ballava_answers_common_questions():
     assert 'Rajma Masala' in ask("what's for tomorrow?")
     assert 'Soak' in ask('what should I prep tonight')
     assert 'Palak Paneer' in ask('I have paneer and spinach')
-    assert 'Ask me' in ask('hello')
+    assert 'Try "What should I cook tonight?"' in ask('hello')
     assert 'Plan my week' in ask('tomorrow', plan={})
+
+
+def test_ask_ballava_answers_food_questions_without_ai():
+    """The questions the old keyword matcher got wrong: calories, protein, fixes, and two named ingredients."""
+    ask = lambda q, **kw: assistant_reply(q, pantry=KITCHEN, now=NOW, log=[], **kw)  # noqa: E731
+    kcal = R['dal_tadka']['nutrition']['kcal']
+    assert f'Dal Tadka: about {kcal} kcal per serving' in ask('How many calories in dal tadka?')['reply']
+    assert 'Curd Rice: about' in ask('Is curd rice healthy?')['reply']
+    assert 'Paneer: 265 kcal' in ask('calories in paneer')['reply']
+    assert 'Kanda Poha: about' in ask('calories in this?', current=R['kanda_poha'])['reply'], 'the open recipe'
+    protein = ask('Give me a high protein lunch')
+    assert protein['reply'].startswith('Protein-rich ideas') and all(R[i]['nutrition']['protein'] >= 12 for i in protein['dishes'])
+    light = ask('light dinner ideas for weight loss')
+    assert light['dishes'] and all(R[i]['nutrition']['kcal'] <= 400 for i in light['dishes'])
+    assert 'Spread it on a plate' in ask('My rice is too sticky')['reply'], 'a Bachao fix'
+    eggs = ask('what can I make with egg and onion')
+    assert eggs['dishes'] and all('egg' in {o for it in R[i]['ingredients'] for o in it['options']} for i in eggs['dishes'][:2])
 
 
 def test_ask_ballava_respects_the_family():

@@ -1,13 +1,90 @@
 {% extends "admin/index.html" %}
+{# The admin dashboard: numbers, quick actions, what needs attention, recent changes and the recipe book at a glance. #}
+{% block nav-breadcrumbs %}{% include "kitchen/admin_nav.html" %}{% endblock %}
+{% block content_title %}{% endblock %}
+{% block coltype %}colM{% endblock %}
+{% block sidebar %}{% endblock %}
+
 {% block content %}
-<div class="ballava-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px">
-  {% for label, value in ballava_stats %}
-  <div class="module" style="padding:12px;margin:0">
-    <div style="font-size:1.6rem;font-weight:700">{{ value }}</div>
-    <div>{{ label }}</div>
+<div class="b-hello">
+  <div>
+    <h2>{{ ballava_greeting }}, {% firstof user.get_short_name user.get_username %}</h2>
+    <p>{% now "l, j F Y" %} · Here's how Ballava is doing.</p>
   </div>
+</div>
+
+<div class="b-stats">
+  {% for icon, label, value, tone in ballava_stats %}
+  <div class="b-stat {{ tone }}"><span class="ico" aria-hidden="true">{{ icon }}</span><b>{{ value }}</b><span>{{ label }}</span></div>
   {% endfor %}
 </div>
+
+<div class="b-actions">
+  <a class="primary" href="{% url 'admin:kitchen_recipe_add' %}">➕ Add a recipe</a>
+  <a href="{% url 'admin:recipe_book' %}">📖 Browse all {{ ballava_book.total }} recipes</a>
+  <a href="{% url 'admin:ingredient_book' %}">🥕 Ingredients &amp; calories</a>
+  <a href="{% url 'admin:kitchen_announcement_add' %}">📣 Post an announcement</a>
+  <a href="{% url 'admin:kitchen_festival_add' %}">🎉 Add a festival</a>
+  <a href="{% url 'admin:admin_logentry_changelist' %}">🧾 Audit log</a>
+</div>
+
+<div class="b-grid">
+  <section class="b-card">
+    <h3>⚠️ Needs your attention</h3>
+    {% if ballava_review or ballava_drafts %}
+    <ul>
+      {% for r in ballava_review %}
+      <li><a href="{% url 'admin:kitchen_recipe_change' r.pk %}">{{ r.name }}</a><span class="b-badge review">Waiting for review</span></li>
+      {% endfor %}
+      {% for r, problems in ballava_drafts %}
+      <li><span><a href="{% url 'admin:kitchen_recipe_change' r.pk %}">{{ r.name }}</a>{% if problems %}<br><span class="b-muted b-problems">{{ problems|join:"; " }}</span>{% endif %}</span><span class="b-badge draft">Draft</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="b-empty">All clear. Nothing is waiting for review.</p>
+    {% endif %}
+  </section>
+
+  <section class="b-card">
+    <h3>🕘 Recent changes</h3>
+    {% if ballava_recent %}
+    <ul>
+      {% for e in ballava_recent %}
+      <li><span>{% if e.is_addition %}Added{% elif e.is_change %}Changed{% else %}Deleted{% endif %} <b>{{ e.object_repr|truncatechars:40 }}</b><br><span class="b-muted">{{ e.user.get_username }} · {{ e.content_type.name|default:"" }}</span></span><span class="b-muted">{{ e.action_time|timesince }} ago</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="b-empty">No changes yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="b-card">
+    <h3>📖 Recipe book at a glance</h3>
+    <ul>
+      <li><span>Live for users</span><b>{{ ballava_book.live }}</b></li>
+      <li><span>Breakfast · Lunch/dinner · Snacks</span><b>{{ ballava_book.breakfast }} · {{ ballava_book.main }} · {{ ballava_book.snack }}</b></li>
+      <li><span><span class="diet veg"></span> Veg · <span class="diet egg"></span> Egg · <span class="diet nonveg"></span> Non-veg</span><b>{{ ballava_book.veg }} · {{ ballava_book.egg }} · {{ ballava_book.nonveg }}</b></li>
+      <li><span>Average per serving</span><b>{{ ballava_book.avg_kcal }} kcal</b></li>
+      <li><span>Hidden from users</span><b>{{ ballava_book.hidden }}</b></li>
+    </ul>
+    <p><a href="{% url 'admin:recipe_book' %}">Open the recipe book →</a></p>
+  </section>
+
+  <section class="b-card">
+    <h3>✨ AI use, last 7 days</h3>
+    <div class="b-bars" role="img" aria-label="AI calls per day">
+      {% for label, calls, pct in ballava_ai_days %}
+      <div class="b-bar"><span>{{ calls }}</span><span class="track"><span class="fill" style="height: {{ pct }}%"></span></span><span>{{ label }}</span></div>
+      {% endfor %}
+    </div>
+    <p class="b-muted">AI Chef and the chat assistant. Each family can make at most {{ ballava_ai_limit }} AI requests a minute.</p>
+  </section>
+</div>
+
 <p class="help" style="margin-bottom:16px">Family kitchens, diets, health goals and meal diaries are private and are not shown in this portal.</p>
-{{ block.super }}
+
+<div class="b-manage">
+  <h2>Manage everything</h2>
+  {{ block.super }}
+</div>
 {% endblock %}

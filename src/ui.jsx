@@ -44,6 +44,45 @@ export function Thinking({ state, children = 'Thinking…' }) {
   return null;
 }
 
+// ❤️ Save a dish. `saved` / `onToggle` come from App (the family's saved dishes, shared between phones).
+export function SaveButton({ recipe, isSaved, toggleSave, className = '' }) {
+  if (!recipe || !toggleSave) return null;
+  const on = isSaved(recipe.id);
+  return (
+    <button type="button" className={'save-btn ' + (on ? 'on ' : '') + className} aria-pressed={on}
+      aria-label={on ? `Remove ${recipe.name} from saved dishes` : `Save ${recipe.name}`} title={on ? 'Saved' : 'Save this dish'}
+      onClick={e => { e.stopPropagation(); toggleSave(recipe); }}>
+      <span aria-hidden="true">{on ? '♥' : '♡'}</span>
+    </button>
+  );
+}
+
+export const kcalOf = recipe => recipe?.nutrition?.kcal ?? null;
+const g = v => `${Math.round(v || 0)} g`;
+
+// Calories and nutrients for one serving, with honest notes about what the estimate includes.
+export function NutritionCard({ n }) {
+  if (!n || n.kcal == null) return null;
+  const tiles = [['Protein', n.protein, 'protein'], ['Carbs', n.carbs, 'carbs'], ['Fat', n.fat, 'fat'], ['Fibre', n.fibre, 'fibre']];
+  const oil = n.oilTsp ? ` Includes about ${n.oilTsp === 1.5 ? '1½ tsp' : n.oilTsp === 3 ? '1 tbsp' : n.oilTsp + ' tsp'} of cooking oil per serving.` : '';
+  return (
+    <section className="card nutrition" aria-label="Nutrition per serving">
+      <div className="nutri-head">
+        <div><b className="nutri-kcal">{n.kcal}</b> <span>kcal</span></div>
+        <span className="muted small">per serving · approx.</span>
+      </div>
+      <div className="nutri-tiles">
+        {tiles.map(([label, v, cls]) => <div key={label} className={'nutri-tile ' + cls}><b>{g(v)}</b><span>{label}</span></div>)}
+      </div>
+      <p className="muted small">
+        Whole dish ≈ {n.totalKcal} kcal, serves {n.serves}.{oil}
+        {n.source === 'ai' ? ' Estimated by AI.' : ''}
+        {n.unknown?.length ? ` Not counted: ${n.unknown.join(', ')}.` : ''} Optional items aren't counted.
+      </p>
+    </section>
+  );
+}
+
 export function expiryLabel(days) {
   if (days === null) return { text: 'Keeps well', cls: 'ok' };
   if (days < 0) return { text: 'Expired', cls: 'bad' };

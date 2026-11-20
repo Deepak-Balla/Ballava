@@ -190,6 +190,55 @@ def test_admin_can_change_their_password(admin_client):
     assert fresh.post('/admin/login/', {'username': ADMIN['username'], 'password': 'a-brand-new-password'}).status_code == 302
 
 
+def test_recipe_book_shows_every_recipe(admin_client):
+    from kitchen.engine import ALL_RECIPES
+    import re
+    page = admin_client.get('/admin/recipe-book/').content.decode()
+    links = re.findall(r'href="/admin/recipe-book/([a-z0-9_]+)/"', page)
+    assert sorted(links) == sorted(r['id'] for r in ALL_RECIPES), 'every built-in recipe has a row with a details link'
+    for name in ('Kanda Poha', 'Dal Tadka', 'Chicken Curry'):
+        assert name in page
+    page = admin_client.get('/admin/recipe-book/?q=paneer&diet=veg&sort=kcal').content.decode()
+    assert 'Palak Paneer' in page and 'Chicken Curry' not in page
+
+
+def test_recipe_book_includes_admin_drafts_and_hidden(admin_client):
+    admin_client.post('/admin/kitchen/recipe/add/', recipe_form(recipe_id='draft_dish', name='Draft Only Dish'))
+    HiddenRecipe.objects.create(recipe_id='curd_rice')
+    page = admin_client.get('/admin/recipe-book/?state=draft').content.decode()
+    assert 'Draft Only Dish' in page and 'Kanda Poha' not in page
+    assert 'Curd Rice' in admin_client.get('/admin/recipe-book/?state=hidden').content.decode()
+
+
+def test_recipe_details_with_calories_and_edit_link(admin_client):
+    page = admin_client.get('/admin/recipe-book/dal_tadka/').content.decode()
+    from kitchen.engine import RECIPE_BY_ID
+    assert 'Dal Tadka' in page and 'Toor dal' in page and str(RECIPE_BY_ID['dal_tadka']['nutrition']['kcal']) in page
+    assert '/admin/kitchen/recipe/add/?copy_from=dal_tadka' in page and 'Hide from users' in page
+    add = admin_client.get('/admin/kitchen/recipe/add/?copy_from=dal_tadka').content.decode()
+    assert 'value="dal_tadka" selected' in add, 'Edit starts a copy of the built-in recipe'
+    assert admin_client.get('/admin/recipe-book/no_such_dish/').status_code == 404
+
+
+def test_ingredient_list_with_nutrition(admin_client):
+    page = admin_client.get('/admin/ingredient-book/?category=Dairy+%26+Eggs').content.decode()
+    assert 'Paneer' in page and '265' in page and 'Onion' not in page
+    admin_client.post('/admin/kitchen/ingredient/add/', {'ingredient_id': 'gongura', 'name': 'Gongura', 'category': 'Vegetables',
+                                                         'diet': 'veg', 'kcal': 50, 'protein': 2, 'grams_per_cup': 30})
+    assert 'Gongura' in admin_client.get('/admin/ingredient-book/?q=gong').content.decode()
+    from kitchen import catalog, engine
+    catalog.live()
+    assert engine.BY_ID['gongura']['nutrition']['kcal'] == 50
+
+
+def test_new_admin_look_and_dashboard(admin_client, make_user):
+    page = admin_client.get('/admin/').content.decode()
+    for text in ('kitchen/admin.css', 'ballava-nav', 'Recipe book', 'Needs your attention', 'AI use, last 7 days', 'Meals logged'):
+        assert text in page, text
+    assert 'ballava-nav' not in Client().get('/admin/login/').content.decode(), 'no section bar before signing in'
+    assert make_user().get('/admin/recipe-book/').status_code == 302, 'family users cannot open the recipe book'
+
+
 def test_admin_sign_out(admin_client):
     admin_client.post('/admin/logout/')
     assert admin_client.get('/admin/').status_code == 302

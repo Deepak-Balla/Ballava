@@ -14,10 +14,11 @@ import AiChef from './screens/AiChef.jsx';
 import Plan from './screens/Plan.jsx';
 import Track from './screens/Track.jsx';
 import More from './screens/More.jsx';
-import Ask from './screens/Ask.jsx';
 import Account from './screens/Account.jsx';
 import Login from './screens/Login.jsx';
 import Vote from './screens/Vote.jsx';
+import Saved from './screens/Saved.jsx';
+import Assistant, { AssistantButton } from './Assistant.jsx';
 
 const isGuest = () => { try { return localStorage.getItem('ballava.guest') === '1'; } catch { return false; } };
 
@@ -32,6 +33,8 @@ export default function App() {
   const [plan, setPlan] = useSynced('plan', {});
   const [pins, setPins] = useSynced('pins', []);
   const [prefs, setPrefs] = useSynced('prefs', {});
+  const [savedDishes, setSavedDishes] = useSynced('savedDishes', []);
+  const [chatOpen, setChatOpen] = useState(false);
   const [catalog, setCatalog] = useState(getCatalog);
   const [catalogFailed, setCatalogFailed] = useState(false);
   const [toast, setToast] = useState(null);
@@ -98,7 +101,7 @@ export default function App() {
   // Older diary entries only have a timestamp; give each a day and a meal for display.
   const log = useMemo(() => history.map(h => ({ ...h, date: h.date || dayKey(h.at), slot: h.slot || slotNow(h.at) })), [history]);
   // What the family knows, sent along whenever the Python brain is asked something.
-  const family = useMemo(() => ({ pantry, members, history, pins, aiRecipes }), [pantry, members, history, pins, aiRecipes]);
+  const family = useMemo(() => ({ pantry, members, history, pins, aiRecipes, savedDishes }), [pantry, members, history, pins, aiRecipes, savedDishes]);
 
   // Returns the ids that were actually new (so messages can be accurate).
   const addToPantry = useCallback((ids) => {
@@ -128,7 +131,18 @@ export default function App() {
 
   const findRecipe = useCallback(id => recipeById(id) || aiRecipes[id], [aiRecipes, catalog]);
 
+  // ❤️ Saved dishes, shared with the family. AI recipes are kept in aiRecipes, so saving one keeps it too.
+  const savedIds = useMemo(() => new Set(savedDishes.map(s => s.id)), [savedDishes]);
+  const isSaved = useCallback(id => savedIds.has(id), [savedIds]);
+  const toggleSave = useCallback(recipe => {
+    const on = savedIds.has(recipe.id);
+    setSavedDishes(list => (on ? list.filter(s => s.id !== recipe.id) : [...list.filter(s => s.id !== recipe.id), { id: recipe.id, at: Date.now() }]));
+    if (!on && recipe.ai) setAiRecipes(r => ({ ...r, [recipe.id]: recipe }));
+    notify(on ? `Removed ${recipe.name} from saved dishes` : `Saved ${recipe.name} ❤️`);
+  }, [savedIds, setSavedDishes, setAiRecipes, notify]);
+
   const [screen, param] = route;
+  useEffect(() => { setChatOpen(false); }, [screen, param]);
   if (screen === 'vote') return <Vote token={param} />;
 
   if (!auth.checked) return <div className="splash"><span className="brand-mark">B</span></div>;
@@ -150,6 +164,7 @@ export default function App() {
   const ctx = {
     pantry, setPantry, addToPantry, members, setMembers, shopping, setShopping, addToShopping, history, setHistory, log, logMeal, ratings, aiRecipes, setAiRecipes,
     filters, setFilters, notify, aiStatus, findRecipe, plan, setPlan, pins, setPins, prefs, setPrefs, catalog, family, auth, loadMe, signedOut,
+    savedDishes, isSaved, toggleSave, openAssistant: () => setChatOpen(true),
   };
 
   let body;
@@ -164,7 +179,8 @@ export default function App() {
     case 'plan': body = <Plan {...ctx} />; break;
     case 'track': body = <Track {...ctx} />; break;
     case 'more': body = <More {...ctx} />; break;
-    case 'ask': body = <Ask {...ctx} />; break;
+    case 'ask': body = <Assistant full screen="ask" ctx={ctx} />; break;
+    case 'saved': body = <Saved {...ctx} />; break;
     case 'account': body = <Account {...ctx} />; break;
     default: body = <Home {...ctx} />;
   }
@@ -172,14 +188,16 @@ export default function App() {
   const tabs = [
     ['home', 'Cook', '🍳'], ['plan', 'Plan', '🗓️'], ['track', 'Track', '📊'], ['pantry', 'Kitchen', '🧺'], ['list', 'List', '🛒'], ['more', 'More', '☰'],
   ];
-  const moreScreens = ['more', 'family', 'bachao', 'ask', 'account'];
+  const moreScreens = ['more', 'family', 'bachao', 'ask', 'account', 'saved'];
   const active = id => (id === 'more' ? moreScreens.includes(screen) : screen === id || (id === 'home' && !['plan', 'track', 'pantry', 'list', ...moreScreens].includes(screen)));
   const hideNav = screen === 'cook';
   const listCount = shopping.filter(s => !s.done).length;
 
   return (
-    <div className={'app' + (hideNav ? ' no-nav' : '')}>
+    <div className={'app' + (hideNav ? ' no-nav' : '') + (screen === 'recipe' ? ' on-recipe' : '')}>
       <main>{body}</main>
+      {screen !== 'ask' && !chatOpen && <AssistantButton onOpen={() => setChatOpen(true)} />}
+      {chatOpen && <Assistant screen={screen} param={param} onClose={() => setChatOpen(false)} ctx={ctx} />}
       {toast && <div className="toast" role="status">{toast}</div>}
       {!hideNav && (
         <nav className="tabbar" aria-label="Main">

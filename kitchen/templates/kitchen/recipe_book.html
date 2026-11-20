@@ -1,0 +1,63 @@
+{% extends "admin/base_site.html" %}
+{# Every recipe users can see (built-in and added by admins), plus drafts and hidden ones, with search and filters. #}
+{% block breadcrumbs %}<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Home</a> &rsaquo; Recipe book</div>{% endblock %}
+
+{% block content %}
+<p class="b-muted">Every recipe in Ballava: the {{ builtin_total }} built-in ones that come with the app, and the ones admins added or edited. Calories are per serving, worked out from the ingredients.</p>
+
+<form class="b-filters" method="get" role="search">
+  <input type="search" name="q" value="{{ params.q }}" placeholder="Search name, cuisine, ingredient…" aria-label="Search recipes">
+  <select name="meal" aria-label="Meal">
+    <option value="">Any meal</option>
+    {% for value, label in meal_choices %}<option value="{{ value }}"{% if params.meal == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <select name="diet" aria-label="Diet">
+    <option value="">Any diet</option>
+    {% for value, label in diet_choices %}<option value="{{ value }}"{% if params.diet == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <select name="source" aria-label="Source">
+    <option value="">Any source</option>
+    {% for value, label in source_choices %}<option value="{{ value }}"{% if params.source == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <select name="state" aria-label="Status">
+    <option value="">Any status</option>
+    {% for value, label in state_choices %}<option value="{{ value }}"{% if params.state == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <select name="sort" aria-label="Sort by">
+    {% for value, label in sort_choices %}<option value="{{ value }}"{% if params.sort == value %} selected{% endif %}>Sort: {{ label }}</option>{% endfor %}
+  </select>
+  <input type="submit" value="Show">
+  <a class="b-reset" href="{% url 'admin:recipe_book' %}">Clear</a>
+</form>
+
+<div class="b-counts">
+  <span class="b-badge">{{ entries|length }} shown of {{ total }}</span>
+  <span class="b-badge builtin">{{ counts.builtin }} built-in</span>
+  <span class="b-badge edited">{{ counts.edited }} built-in, edited</span>
+  <span class="b-badge custom">{{ counts.custom }} added by admins</span>
+  <span class="b-badge hidden">{{ counts.hidden }} hidden</span>
+  <span class="b-badge draft">{{ counts.draft }} drafts not live</span>
+</div>
+
+<div class="b-table-wrap">
+<table class="b-table" id="recipe-book">
+  <thead><tr><th>Dish</th><th>Meals</th><th class="num">Time</th><th>Diet</th><th class="num">kcal / serving</th><th class="num">Protein</th><th>Source</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for e in entries %}
+    <tr>
+      <td><a class="b-name" href="{% url 'admin:recipe_detail' e.id %}">{{ e.r.name }}</a><div class="b-sub">{% if e.r.alt %}{{ e.r.alt }} · {% endif %}{{ e.r.cuisine }} · <code>{{ e.id }}</code></div></td>
+      <td>{{ e.meals }}</td>
+      <td class="num">{{ e.r.time }} min</td>
+      <td><span class="diet {{ e.r.diet }}" title="{{ e.diet_label }}"></span> {{ e.diet_label }}</td>
+      <td class="num">{% if e.kcal is not None %}{{ e.kcal }}{% else %}–{% endif %}</td>
+      <td class="num">{% if e.protein is not None %}{{ e.protein|floatformat:0 }} g{% else %}–{% endif %}</td>
+      <td><span class="b-badge {{ e.source_key }}">{{ e.source }}</span></td>
+      <td><span class="b-badge {{ e.state }}">{{ e.status }}</span>{% if e.pending %}<div class="b-sub">Edits waiting to be published</div>{% endif %}</td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="8" class="b-empty">No recipes match. <a href="{% url 'admin:recipe_book' %}">Clear the filters</a>.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

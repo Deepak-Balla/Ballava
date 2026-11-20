@@ -128,6 +128,55 @@ def test_ai_chef_explains_it_is_switched_off(page):
     page.get_by_text(re.compile('AI_PROVIDER')).wait_for()
 
 
+def test_assistant_opens_on_every_tab_and_answers(page):
+    for name in ['Cook', 'Plan', 'Track', 'Kitchen', 'List', 'More']:
+        tab(page, name)
+        page.get_by_role('button', name='Open the Ballava assistant').click()
+        page.get_by_role('dialog', name='Ballava assistant').wait_for()
+        page.get_by_role('button', name='Close assistant').click()
+        expect(page.get_by_role('dialog', name='Ballava assistant')).to_have_count(0)
+    tab(page, 'Cook')
+    page.get_by_role('button', name='Open the Ballava assistant').click()
+    page.get_by_label('Your question').fill('How many calories in dal tadka?')
+    page.get_by_role('button', name='Send').click()
+    page.locator('.bubble.bot', has_text='kcal per serving').wait_for()
+    snap(page, '09-assistant')
+    page.locator('.assistant .dish-chip', has_text='Dal Tadka').click()
+    page.get_by_role('heading', name=re.compile('Dal Tadka')).wait_for()
+    expect(page.get_by_role('dialog', name='Ballava assistant')).to_have_count(0), 'opening a dish closes the chat'
+
+
+def test_recipe_shows_calories_and_can_be_saved(page):
+    page.locator('.nutrition .nutri-kcal').wait_for()
+    expect(page.locator('.ing-list .line-kcal').first).to_be_visible()
+    page.get_by_role('button', name='Save Dal Tadka').click()
+    page.get_by_text(re.compile('Saved Dal Tadka')).wait_for()
+    snap(page, '10-recipe-nutrition')
+    page.goto(page.url.split('#')[0] + '#/recipe/kanda_poha')
+    page.get_by_role('button', name='Save Kanda Poha').click()
+    tab(page, 'Cook')
+    page.locator('.saved-tile', has_text='Kanda Poha').wait_for()
+    expect(page.locator('.saved-tile', has_text='Dal Tadka')).to_have_count(0), 'cooked today, so not suggested again yet'
+    more(page, 'Saved dishes')
+    page.locator('.dish-title', has_text='Dal Tadka').wait_for()
+    page.get_by_text('Made today').wait_for()
+    snap(page, '11-saved')
+    page.get_by_role('button', name='Remove Dal Tadka from saved dishes').click()
+    page.get_by_role('button', name='Remove Kanda Poha from saved dishes').click()
+    page.get_by_text('Nothing saved yet').wait_for()
+
+
+def test_calories_in_the_diary_and_the_light_filter(page):
+    tab(page, 'Track')
+    page.locator('.kcal-card').wait_for()
+    tab(page, 'Cook')
+    page.get_by_role('button', name='Light (≤400 kcal)').click()
+    expect(page.locator('.dish-card .kcal').first).to_be_visible()
+    for text in page.locator('.dish-card .kcal').all_inner_texts():
+        assert int(text.split()[0]) <= 400, text
+    page.get_by_role('button', name='Light (≤400 kcal)').click()
+
+
 def test_data_survives_a_reload(page):
     page.reload()
     tab(page, 'Kitchen')

@@ -1,11 +1,12 @@
 import React, { useMemo } from 'react';
-import { useSoon, daysLeft, defaultExpiry, dayKey, SLOTS, SLOT_LABEL } from '../catalog.js';
+import { useSoon, daysLeft, defaultExpiry, dayKey, addDays, SLOTS, SLOT_LABEL } from '../catalog.js';
 import { go, useBrain } from '../lib.js';
 import { t } from '../i18n.js';
-import { DietDot, ingName, expiryLabel, Thinking } from '../ui.jsx';
+import { DietDot, ingName, expiryLabel, Thinking, SaveButton, kcalOf } from '../ui.jsx';
 
 const FILTERS = [
-  ['veg', 'Veg only'], ['quick', 'Under 20 min'], ['leftover', 'Leftover magic'], ['healthy', 'Diabetic-friendly'], ['vrat', 'Vrat / fasting'],
+  ['veg', 'Veg only'], ['quick', 'Under 20 min'], ['light', 'Light (≤400 kcal)'], ['protein', 'Protein-rich'], ['leftover', 'Leftover magic'],
+  ['healthy', 'Diabetic-friendly'], ['vrat', 'Vrat / fasting'],
 ];
 
 const DEMO = ['rice', 'toor_dal', 'onion', 'tomato', 'potato', 'green_chilli', 'curd', 'leftover_rice', 'egg', 'poha', 'lemon', 'coriander',
@@ -19,27 +20,58 @@ function greeting() {
   return 'What\'s for dinner tonight?';
 }
 
-export function DishCard({ r }) {
+export function DishCard({ r, isSaved, toggleSave }) {
   const { recipe } = r;
   const status = r.majorMissing.length === 0
     ? (r.spiceMissing.length ? `Have main items · check ${r.spiceMissing.map(o => ingName(o[0])).join(', ')}` : 'You have everything')
     : `Need ${r.majorMissing.map(o => ingName(o[0])).join(', ')}`;
+  const kcal = kcalOf(recipe);
   return (
-    <button className="dish-card" onClick={() => go('recipe/' + recipe.id)}>
-      <div className="dish-ring" style={{ '--p': Math.round(r.coverage * 100) }} aria-hidden="true">
-        <span>{Math.round(r.coverage * 100)}%</span>
+    <div className="dish-wrap">
+      <button className="dish-card" onClick={() => go('recipe/' + recipe.id)}>
+        <div className="dish-ring" style={{ '--p': Math.round(r.coverage * 100) }} aria-hidden="true">
+          <span>{Math.round(r.coverage * 100)}%</span>
+        </div>
+        <div className="dish-info">
+          <div className="dish-title"><DietDot diet={recipe.diet} /> {recipe.name}</div>
+          {recipe.alt && <div className="dish-alt">{recipe.alt}</div>}
+          <div className="dish-meta">{recipe.time} min · {recipe.cuisine}{kcal != null && <> · <span className="kcal">{kcal} kcal</span></>}</div>
+          <div className={'dish-status ' + (r.majorMissing.length ? 'need' : 'have')}>{status}</div>
+          {r.usesSoon.length > 0 && <div className="pill warn">Uses up {r.usesSoon.map(ingName).join(', ')}</div>}
+          {r.notes.length > 0 && <div className="pill info">{r.notes[0]}</div>}
+          {r.goalWhy && <div className="pill good">{r.goalWhy}</div>}
+          {r.repeat?.reasons[0] && <div className="pill">{r.repeat.reasons[0]}</div>}
+        </div>
+      </button>
+      <SaveButton recipe={recipe} isSaved={isSaved} toggleSave={toggleSave} className="corner" />
+    </div>
+  );
+}
+
+// Saved dishes that haven't been made for a while: an easy "what about this?" row on the home screen.
+function SavedRow({ savedDishes, findRecipe, log, isSaved, toggleSave }) {
+  const last = {};
+  for (const e of log) if (e.recipeId && (!last[e.recipeId] || e.date > last[e.recipeId])) last[e.recipeId] = e.date;
+  const week = addDays(dayKey(), -6);
+  const rows = savedDishes.map(s => findRecipe(s.id)).filter(r => r && !(last[r.id] >= week))
+    .sort((a, b) => (last[a.id] || '').localeCompare(last[b.id] || '')).slice(0, 8);
+  if (!rows.length) return null;
+  return (
+    <>
+      <h3 className="section-title">❤️ From your saved dishes <button className="btn link sm" onClick={() => go('saved')}>See all</button></h3>
+      <div className="saved-row" role="list">
+        {rows.map(r => (
+          <div key={r.id} className="saved-tile" role="listitem">
+            <button className="saved-tile-btn" onClick={() => go('recipe/' + r.id)}>
+              <b><DietDot diet={r.diet} /> {r.name}</b>
+              <span className="muted small">{r.time} min{kcalOf(r) != null ? ` · ${kcalOf(r)} kcal` : ''}</span>
+              <span className="muted small">{last[r.id] ? `Last made ${last[r.id].slice(5).split('-').reverse().join('/')}` : 'Not made yet'}</span>
+            </button>
+            <SaveButton recipe={r} isSaved={isSaved} toggleSave={toggleSave} className="corner" />
+          </div>
+        ))}
       </div>
-      <div className="dish-info">
-        <div className="dish-title"><DietDot diet={recipe.diet} /> {recipe.name}</div>
-        {recipe.alt && <div className="dish-alt">{recipe.alt}</div>}
-        <div className="dish-meta">{recipe.time} min · {recipe.cuisine}</div>
-        <div className={'dish-status ' + (r.majorMissing.length ? 'need' : 'have')}>{status}</div>
-        {r.usesSoon.length > 0 && <div className="pill warn">Uses up {r.usesSoon.map(ingName).join(', ')}</div>}
-        {r.notes.length > 0 && <div className="pill info">{r.notes[0]}</div>}
-        {r.goalWhy && <div className="pill good">{r.goalWhy}</div>}
-        {r.repeat?.reasons[0] && <div className="pill">{r.repeat.reasons[0]}</div>}
-      </div>
-    </button>
+    </>
   );
 }
 
@@ -76,7 +108,8 @@ function TodayCard({ plan, findRecipe, log, logMeal, notify }) {
   );
 }
 
-export default function Home({ pantry, addToPantry, members, filters, setFilters, history, log, logMeal, plan, aiRecipes, aiStatus, notify, findRecipe, catalog, family }) {
+export default function Home({ pantry, addToPantry, members, filters, setFilters, history, log, logMeal, plan, aiRecipes, aiStatus, notify, findRecipe, catalog, family,
+  savedDishes, isSaved, toggleSave, openAssistant }) {
   const today = dayKey();
   // Python (kitchen/api.py -> home) ranks the dishes: what you have, what's spoiling, recent repeats and family goals.
   const brain = useBrain('home', { ...family, filters, plan }, pantry.length > 0);
@@ -119,8 +152,14 @@ export default function Home({ pantry, addToPantry, members, filters, setFilters
           <div className="hero-brand small">Ballava</div>
           <h2>{greeting()}</h2>
         </div>
-        <button className="btn ghost sm" onClick={() => go('ai')}>✨ AI Chef</button>
+        <div className="home-actions">
+          <button className="btn ghost sm" onClick={() => go('saved')} aria-label={`Saved dishes (${savedDishes.length})`}>♥ {savedDishes.length || 'Saved'}</button>
+          <button className="btn ghost sm" onClick={() => go('ai')}>✨ AI Chef</button>
+        </div>
       </header>
+      <button className="ask-bar" onClick={openAssistant}>
+        <span aria-hidden="true">💬</span> <span>Ask anything: "What's for dinner?", "Calories in poha?"</span>
+      </button>
 
       {catalog.announcements.map(a => <div key={a.id} className="note info">📣 {a.text}</div>)}
       <TodayCard plan={plan} findRecipe={findRecipe} log={log} logMeal={logMeal} notify={notify} />
@@ -155,7 +194,9 @@ export default function Home({ pantry, addToPantry, members, filters, setFilters
       <h3 className="section-title">{t('Cook now')} <span className="count">{ready.length}</span></h3>
       <Thinking state={brain}>Finding dishes for you…</Thinking>
       {brain.data && ready.length === 0 && <p className="muted">Nothing complete yet. Check "Almost there" below, or add more to your kitchen.</p>}
-      <div className="dish-list">{ready.slice(0, 12).map(r => <DishCard key={r.recipe.id} r={r} />)}</div>
+      <div className="dish-list">{ready.slice(0, 12).map(r => <DishCard key={r.recipe.id} r={r} isSaved={isSaved} toggleSave={toggleSave} />)}</div>
+
+      <SavedRow savedDishes={savedDishes} findRecipe={findRecipe} log={log} isSaved={isSaved} toggleSave={toggleSave} />
 
       {tips.length > 0 && (
         <div className="card tip-card">
@@ -167,16 +208,20 @@ export default function Home({ pantry, addToPantry, members, filters, setFilters
       )}
 
       <h3 className="section-title">{t('Almost there')} <span className="count">{almost.length}</span></h3>
-      <div className="dish-list">{almost.slice(0, 10).map(r => <DishCard key={r.recipe.id} r={r} />)}</div>
+      <div className="dish-list">{almost.slice(0, 10).map(r => <DishCard key={r.recipe.id} r={r} isSaved={isSaved} toggleSave={toggleSave} />)}</div>
 
       {Object.keys(aiRecipes).length > 0 && (
         <>
           <h3 className="section-title">Your AI creations</h3>
           <div className="dish-list">
-            {Object.values(aiRecipes).map(rec => (
-              <button key={rec.id} className="dish-card slim" onClick={() => go('recipe/' + rec.id)}>
-                <div className="dish-info"><div className="dish-title"><DietDot diet={rec.diet} /> {rec.name}</div><div className="dish-meta">{rec.time} min · AI original</div></div>
-              </button>
+            {Object.values(aiRecipes).slice(-8).reverse().map(rec => (
+              <div key={rec.id} className="dish-wrap">
+                <button className="dish-card slim" onClick={() => go('recipe/' + rec.id)}>
+                  <div className="dish-info"><div className="dish-title"><DietDot diet={rec.diet} /> {rec.name}</div>
+                    <div className="dish-meta">{rec.time} min{kcalOf(rec) != null ? ` · ${kcalOf(rec)} kcal` : ''} · AI original</div></div>
+                </button>
+                <SaveButton recipe={rec} isSaved={isSaved} toggleSave={toggleSave} className="corner" />
+              </div>
             ))}
           </div>
         </>

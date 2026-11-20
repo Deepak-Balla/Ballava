@@ -1,5 +1,6 @@
 """Shared test helpers."""
 import json
+import os
 
 import pytest
 from django.contrib.auth.models import User
@@ -18,10 +19,25 @@ def fresh_catalog():
     engine.apply_catalog()
 
 
+AI_KEYS = ('ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY')
+
+
+@pytest.fixture(autouse=True, scope='session')
+def no_real_ai_anywhere():
+    """Tests never call a real AI or use your real keys, whatever is in your .env. This covers the whole run,
+    including the browser tests' server, which starts before any single test does. AI tests plug in fakes."""
+    from django.conf import settings
+    saved = {k: os.environ.pop(k) for k in AI_KEYS if k in os.environ}
+    provider = settings.AI_PROVIDER
+    settings.AI_PROVIDER = 'claude'
+    yield
+    os.environ.update(saved)
+    settings.AI_PROVIDER = provider
+
+
 @pytest.fixture(autouse=True)
 def no_real_ai(monkeypatch, settings):
-    """Tests never call a real AI or use your real keys, whatever is in your .env. AI tests plug in fakes."""
-    for name in ('ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'):
+    for name in AI_KEYS:
         monkeypatch.delenv(name, raising=False)
     settings.AI_PROVIDER = 'claude'
 

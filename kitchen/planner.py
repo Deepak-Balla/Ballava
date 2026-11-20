@@ -10,8 +10,10 @@ minutes, exactly as the browser reports it (India is -330). It defaults to India
 from datetime import date as Date, datetime, timedelta, timezone
 
 from .data.ingredients import ASSUMED, BY_ID
-from .engine import (FLAVOURINGS, RECIPE_BY_ID, household_check, match_recipe, now_ms, parse_ingredients, recipes_from,
-                     suggest, use_soon)
+from .data.rescue import RESCUES
+from .engine import (FLAVOURINGS, LIGHT_KCAL, PROTEIN_G, RECIPE_BY_ID, find_rescue, household_check, match_recipe, now_ms,
+                     nutrition_ok, parse_ingredients, recipes_from, suggest, use_soon)
+from .nutrition import summary as nutrition_summary
 
 SLOTS = ['breakfast', 'lunch', 'dinner']
 SLOT_LABEL = {'breakfast': 'Breakfast', 'lunch': 'Lunch', 'dinner': 'Dinner', 'snack': 'Snack'}
@@ -290,6 +292,8 @@ def recommend(pantry=(), members=(), ratings=None, log=(), pins=(), filters=None
             continue
         if filters.get('healthy') and 'diabetic-friendly' not in recipe['tags']:
             continue
+        if not nutrition_ok(recipe, filters):
+            continue
         house = household_check(recipe, diners)
         if not house['ok']:
             continue
@@ -546,9 +550,26 @@ def menu_message(day, lang='en', members=(), extra=None):
 
 
 # ---------------------------------------------------- Ask Ballava
-def assistant_reply(text, plan=None, now=None, tz=INDIA, **ctx):
-    """The assistant behind the in-app chat. It knows the family, the plan and the kitchen.
-    ctx: pantry, members, ratings, log, pins, extra_recipes, hidden, extra."""
+NUTRITION_WORDS = ('calorie', 'kcal', 'nutrition', 'protein', 'carb', 'fat in', 'fibre', 'fiber', 'healthy')
+HOW_WORDS = ('how do', 'how to', 'how can', 'fix', 'too ', 'sticky', 'salty', 'burnt', 'burned', 'soggy', 'bitter', 'watery', 'mushy',
+             'lumpy', 'curdled', 'split', 'sour', 'raw taste', 'went wrong', 'save it', 'rescue')
+
+
+def mentioned_recipe(q, extra_recipes=(), hidden=()):
+    """The recipe a question names ('calories in dal tadka?'), preferring the longest name that matches."""
+    best = None
+    for r in recipes_from(extra_recipes, hidden):
+        for name in [r['name'], *(r.get('alt') or '').split(' / ')]:
+            name = name.strip().lower()
+            if len(name) > 3 and name in q and (not best or len(name) > best[0]):
+                best = (len(name), r)
+    return best[1] if best else None
+
+
+def assistant_reply(text, plan=None, now=None, tz=INDIA, current=None, **ctx):
+    """The built-in assistant (used when AI is off or busy). It knows the family, the plan, the kitchen and
+    the calories of every dish. ctx: pantry, members, ratings, log, pins, extra_recipes, hidden, extra.
+    `current` is the recipe the user is looking at, if any."""
     q = str(text or '').lower()
     plan = plan or {}
     now = now or now_ms()
@@ -561,6 +582,43 @@ def assistant_reply(text, plan=None, now=None, tz=INDIA, **ctx):
                          for n, r in enumerate(rows[:3], 1))
 
     asks = lambda *words: any(w in q for w in words)  # noqa: E731
+    named = mentioned_recipe(q, ctx.get('extra_recipes') or (), ctx.get('hidden') or ())
+    found_now = parse_ingredients(q)['found']
+    wants_list = asks('high protein', 'high-protein', 'protein rich', 'protein-rich', 'more protein', 'low calorie', 'low-calorie',
+                      'less calorie', 'light ', 'lose weight', 'weight loss', 'diet food')
+
+    if asks(*NUTRITION_WORDS) and not wants_list:
+        # "Calories in dal tadka?" (a named dish), "calories in paneer?" (an ingredient), or "calories in this?" (the open recipe)
+        about = named or (None if found_now else current)
+        if about and about.get('nutrition'):
+            n = about['nutrition']
+            extra_line = ' (The AI estimated this.)' if n.get('source') == 'ai' else ''
+            return {'reply': f"{about['name']}: {nutrition_summary(n)}. The whole dish (serves {n['serves']}) is about "
+                             f"{n['totalKcal']} kcal.{extra_line}\nThese are estimates: oil, portion size and brands change them.",
+                    'dishes': [about['id']] if about is not current else []}
+        lines = [f"{BY_ID[i]['name']}: {round(BY_ID[i]['nutrition']['kcal'])} kcal, protein {BY_ID[i]['nutrition']['protein']} g "
+                 f"per 100 g" for i in found_now[:4] if (BY_ID.get(i) or {}).get('nutrition')]
+        if lines:
+            return {'reply': '\n'.join(lines) + '\n(Approximate values.)'}
+    if wants_list:
+        protein = asks('protein')
+        slot = 'breakfast' if asks('breakfast', 'nashta') else 'lunch' if asks('lunch') else 'dinner' if asks('dinner', 'tonight') else None
+        rows = recommend(**{**ctx, 'filters': {'protein' if protein else 'light': True}}, slot=slot, date=today, now=now,
+                         fasting_applies=False, tz=tz)
+        # Protein-rich: most protein for the calories. Light: fewest calories. Both from the family's best matches.
+        n = lambda r: r['recipe']['nutrition']  # noqa: E731
+        rows = sorted(rows[:12], key=lambda r: -n(r)['protein'] / max(1, n(r)['kcal']) if protein else n(r)['kcal'])[:3]
+        if rows:
+            head = f'Protein-rich ideas ({PROTEIN_G} g or more a serving):' if protein else f'Lighter ideas ({LIGHT_KCAL} kcal or less a serving):'
+            return {'reply': head + '\n' + '\n'.join(
+                        f"{n}. {r['recipe']['name']}: {r['recipe']['nutrition']['kcal']} kcal, protein {round(r['recipe']['nutrition']['protein'])} g"
+                        for n, r in enumerate(rows, 1)), 'dishes': [r['recipe']['id'] for r in rows]}
+    if asks(*HOW_WORDS) and not named:
+        fixes = find_rescue(q)
+        if fixes and len(fixes) < len(RESCUES):
+            r = fixes[0]
+            tips = '\n'.join(f'- {f}' for f in r['fixes'][:4])
+            return {'reply': f"{r['title']}:\n{tips}" + (f"\nMyth check: {r['myth']}" if r.get('myth') else '')}
 
     if asks('tomorrow', 'kal'):
         day = plan.get(add_days(today, 1)) or {}
@@ -583,11 +641,18 @@ def assistant_reply(text, plan=None, now=None, tz=INDIA, **ctx):
         head = f'Your plan says {name_of(planned)}. Other good options:' if planned else f'For {SLOT_LABEL[slot].lower()}, I\'d suggest:'
         return {'reply': f'{head}\n{dish_lines(rows)}', 'dishes': [r['recipe']['id'] for r in rows[:3]]}
     if found:
-        result = suggest(pantry=[{'id': i} for i in found], members=ctx.get('members') or [],
+        # The things they named, plus what's already in the kitchen. Dishes using more of the named things come first.
+        kitchen = [{'id': i} for i in found] + [p for p in ctx.get('pantry') or [] if p.get('id') not in found]
+        result = suggest(pantry=kitchen, members=ctx.get('members') or [],
                          extra_recipes=ctx.get('extra_recipes') or [], hidden=ctx.get('hidden') or [])
-        pick = (result['ready'] + result['almost'])[:3]
+        rows = result['ready'] + result['almost']
+        uses = lambda r: sum(1 for i in found if any(i in it['options'] for it in r['recipe']['ingredients']))  # noqa: E731
+        pick = sorted((r for r in rows if uses(r)), key=lambda r: (-uses(r), bool(r['majorMissing']), -r['score']))[:3]
         if pick:
+            def status(r):
+                return f", needs {', '.join(_name(o[0]) for o in r['majorMissing'])}" if r['majorMissing'] else ''
             return {'reply': f"With {', '.join(_name(i) for i in found)} you could make:\n"
-                             + '\n'.join(f"{n}. {r['recipe']['name']} ({r['recipe']['time']} min)" for n, r in enumerate(pick, 1)),
+                             + '\n'.join(f"{n}. {r['recipe']['name']} ({r['recipe']['time']} min{status(r)})" for n, r in enumerate(pick, 1)),
                     'dishes': [r['recipe']['id'] for r in pick]}
-    return {'reply': 'Ask me things like "What should I cook tonight?", "Tiffin ideas", "What\'s planned for tomorrow?", or "I have paneer and spinach".'}
+    return {'reply': 'I can answer simple questions right now. Try "What should I cook tonight?", "Tiffin ideas", '
+                     '"Calories in dal tadka?", "High protein dinner", "Rice is too sticky" or "I have paneer and spinach".'}

@@ -11,6 +11,7 @@ import time
 from .data.ingredients import ASSUMED, BY_ID, INGREDIENTS, JAIN_BLOCKED, ONION_GARLIC
 from .data.recipes import RECIPES
 from .data.rescue import RESCUES
+from .nutrition import recipe_nutrition
 
 DAY_MS = 24 * 60 * 60 * 1000
 DIET_RANK = {'veg': 0, 'egg': 1, 'nonveg': 2}
@@ -68,7 +69,7 @@ def prepare_recipe(raw):
     def blocked_required(blocked):
         return any(all(i in blocked for i in it['options']) for it in required)
 
-    return {
+    recipe = {
         **r,
         'ingredients': ingredients,
         'steps': [parse_step(s) for s in r['steps']],
@@ -78,6 +79,8 @@ def prepare_recipe(raw):
         'jainOk': not blocked_required(JAIN_BLOCKED),
         'hasChilli': any(any(i in ('green_chilli', 'red_chilli_powder', 'dry_red_chilli') for i in it['options']) for it in ingredients),
     }
+    recipe['nutrition'] = recipe_nutrition(recipe)
+    return recipe
 
 
 ALL_RECIPES = [prepare_recipe(r) for r in RECIPES]
@@ -222,6 +225,19 @@ def match_recipe(recipe, pantry_ids, soon_ids=()):
     }
 
 
+LIGHT_KCAL, PROTEIN_G = 400, 12
+
+
+def nutrition_ok(recipe, filters):
+    """The 'Light' (400 kcal or less a serving) and 'Protein-rich' (12 g or more) filters."""
+    n = recipe.get('nutrition') or {}
+    if filters.get('light') and (n.get('kcal') is None or n['kcal'] > LIGHT_KCAL):
+        return False
+    if filters.get('protein') and (n.get('protein') or 0) < PROTEIN_G:
+        return False
+    return True
+
+
 def suggest(pantry=(), members=(), filters=None, ratings=None, now=None, extra_recipes=(), hidden=()):
     """Dishes you can cook now ('ready') and nearly cook ('almost'), best first. ratings: {recipe id: 1-5}"""
     filters, ratings = filters or {}, ratings or {}
@@ -241,6 +257,8 @@ def suggest(pantry=(), members=(), filters=None, ratings=None, now=None, extra_r
         if filters.get('healthy') and 'diabetic-friendly' not in tags:
             continue
         if filters.get('meal') and filters['meal'] not in recipe['meal']:
+            continue
+        if not nutrition_ok(recipe, filters):
             continue
         house = household_check(recipe, members)
         if not house['ok']:
@@ -340,12 +358,14 @@ def normalize_ai_recipe(raw):
         raise ValueError('AI recipe has no name')
     ing = []
     for x in (raw.get('ingredients') if isinstance(raw.get('ingredients'), list) else [])[:25]:
-        label = x if isinstance(x, str) else str((x or {}).get('name') or '')
-        found = parse_ingredients(label)['found']
-        id_ = found[0] if found else None
+        label = (x if isinstance(x, str) else str((x or {}).get('name') or '')).strip()[:60]
+        parsed = parse_ingredients(label)
+        id_ = parsed['found'][0] if parsed['found'] else None
         qty = '' if isinstance(x, str) else str(x.get('quantity') or x.get('qty') or '')
         item = {'options': [id_ or label.lower()[:40]], 'qty': qty, 'optional': bool(isinstance(x, dict) and x.get('optional'))}
-        if not id_:
+        if not id_ or parsed['unknown']:
+            # Keep the AI's own words when they say more than the ingredient we matched
+            # ("Almond butter" is not just butter): they are shown, and checked for diet and allergens.
             item['custom'] = label
         ing.append(item)
     steps = []
@@ -373,25 +393,81 @@ def normalize_ai_recipe(raw):
     h = h - 0x100000000 if h >= 0x80000000 else h
     required = [i for i in ing if not i['optional']]
     first = lambda it: it['options'][0]  # noqa: E731
+    # Diet and allergens: never trust a single source. Take the strictest of the matched ingredients,
+    # words in the ingredient names we couldn't match, and what the AI itself says.
     diet = 'veg'
+    allergens = []
     for it in required:
-        d = BY_ID.get(first(it), {}).get('diet')
-        if d and DIET_RANK[d] > DIET_RANK[diet]:
-            diet = d
+        for d in (BY_ID.get(first(it), {}).get('diet'), _diet_from_words(it.get('custom'))):
+            if d and DIET_RANK[d] > DIET_RANK[diet]:
+                diet = d
+        allergens.extend(BY_ID.get(first(it), {}).get('allergens', []))
+        allergens.extend(_allergens_from_words(it.get('custom')))
+    if raw.get('diet') in DIET_RANK and DIET_RANK[raw['diet']] > DIET_RANK[diet]:
+        diet = raw['diet']
+    if isinstance(raw.get('allergens'), list):
+        allergens.extend(a for a in map(str, raw['allergens']) if a in ALLERGENS)
+    meal = [m for m in (raw.get('meal') if isinstance(raw.get('meal'), list) else []) if m in ('breakfast', 'lunch', 'dinner', 'snack')]
     spice = number(raw.get('spice'), 2)
-    return {
+    recipe = {
         'id': 'ai_' + _base36(abs(h)), 'name': name, 'alt': str(raw['alt'])[:60] if raw.get('alt') else None,
-        'cuisine': str(raw.get('cuisine') or 'Ballava original')[:40], 'meal': ['lunch', 'dinner'],
-        'time': max(5, min(240, number(raw.get('time'), 30) or 30)), 'serves': number(raw.get('serves'), 2) or 2,
+        'cuisine': str(raw.get('cuisine') or 'Ballava original')[:40], 'meal': list(dict.fromkeys(meal)) or ['lunch', 'dinner'],
+        'time': max(5, min(240, number(raw.get('time'), 30) or 30)), 'serves': max(1, min(12, number(raw.get('serves'), 2) or 2)),
         'spice': spice if spice in (1, 2, 3) else 2, 'tags': ['ai'],
         'tip': str(raw['why'])[:400] if raw.get('why') else None,
         'safety': str(raw['safety'])[:400] if raw.get('safety') else None,
         'ingredients': ing, 'steps': steps, 'ai': True, 'diet': diet,
-        'allergens': list(dict.fromkeys(a for it in required for a in BY_ID.get(first(it), {}).get('allergens', []))),
+        'allergens': list(dict.fromkeys(allergens)),
         'needsOnionGarlic': any(first(it) in ONION_GARLIC for it in required),
         'jainOk': not any(first(it) in JAIN_BLOCKED for it in required),
         'hasChilli': any(first(it) in ('green_chilli', 'red_chilli_powder', 'dry_red_chilli') for it in ing),
     }
+    recipe['nutrition'] = _ai_nutrition(recipe, raw.get('nutrition'))
+    return recipe
+
+
+ALLERGENS = ('dairy', 'gluten', 'nuts', 'egg', 'seafood')
+_WORDS = {
+    'nonveg': r'chicken|mutton|lamb|goat|meat|keema|beef|pork|bacon|ham|fish|prawn|shrimp|crab|squid|anchov|sardine|tuna|salmon',
+    'egg': r'\begg',
+    'dairy': r'milk|cream|cheese|butter|ghee|paneer|curd|yog(h)?urt|khoa|khoya|malai|dahi',
+    'gluten': r'wheat|maida|atta|bread|semolina|rava|sooji|suji|pasta|noodle|vermicelli|semiya|barley|biscuit',
+    'nuts': r'peanut|groundnut|cashew|almond|walnut|pistachio|hazelnut|\bnuts?\b',
+    'seafood': r'fish|prawn|shrimp|crab|squid|lobster|anchov|sardine|tuna|salmon',
+}
+
+
+def _diet_from_words(text):
+    t = str(text or '').lower()
+    return 'nonveg' if re.search(_WORDS['nonveg'], t) else 'egg' if re.search(_WORDS['egg'], t) else None
+
+
+def _allergens_from_words(text):
+    t = str(text or '').lower()
+    return [a for a in ALLERGENS if re.search(_WORDS[a], t)] if t else []
+
+
+def _ai_nutrition(recipe, claimed):
+    """Our own calorie count when we know most of the ingredients; otherwise the AI's estimate, marked as such."""
+    ours = recipe_nutrition(recipe)
+    required = [i for i in recipe['ingredients'] if not i['optional']]
+    known = sum(1 for i in required if BY_ID.get(i['options'][0], {}).get('nutrition'))
+    if required and known / len(required) >= 0.75:
+        return ours
+    try:
+        kcal = float((claimed or {}).get('kcal'))
+    except (TypeError, ValueError, AttributeError):
+        return ours
+    if not 20 <= kcal <= 2500:
+        return ours
+
+    def grams(key):
+        try:
+            return round(max(0.0, min(300.0, float(claimed.get(key) or 0))), 1)
+        except (TypeError, ValueError):
+            return 0.0
+    return {**ours, 'kcal': round(kcal), 'protein': grams('protein'), 'carbs': grams('carbs'), 'fat': grams('fat'),
+            'fibre': ours['fibre'], 'totalKcal': round(kcal * ours['serves']), 'source': 'ai'}
 
 
 def _base36(n):
@@ -418,7 +494,7 @@ def apply_catalog(ingredients=(), rescues=()):
     for raw in ingredients:
         if raw['id'] in BY_ID:
             continue
-        item = {'allergens': [], 'diet': 'veg', 'aliases': [], 'shelfDays': None, **raw}
+        item = {'allergens': [], 'diet': 'veg', 'aliases': [], 'shelfDays': None, 'nutrition': None, 'measures': {}, **raw}
         INGREDIENTS.append(item)
         BY_ID[item['id']] = item
     ALIASES = _build_aliases()

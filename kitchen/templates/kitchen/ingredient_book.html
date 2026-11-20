@@ -1,0 +1,47 @@
+{% extends "admin/base_site.html" %}
+{# Every ingredient with its nutrition per 100 g and kitchen measures, and how many recipes use it. #}
+{% block breadcrumbs %}<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Home</a> &rsaquo; Ingredients</div>{% endblock %}
+
+{% block content %}
+<p class="b-muted">Nutrition is per 100 g, as the ingredient goes into the pot (dals, rice and flours dry). Recipes use these numbers to work out calories. Built-in values are rounded averages from Indian and US food tables. To add an ingredient, use <a href="{% url 'admin:kitchen_ingredient_add' %}">Add ingredient</a>; fill in its nutrition so recipes count it.</p>
+
+<form class="b-filters" method="get" role="search">
+  <input type="search" name="q" value="{{ params.q }}" placeholder="Search name or other names (pyaz, palak…)" aria-label="Search ingredients">
+  <select name="category" aria-label="Category">
+    <option value="">All categories</option>
+    {% for c in categories %}<option value="{{ c }}"{% if params.category == c %} selected{% endif %}>{{ c }}</option>{% endfor %}
+  </select>
+  <select name="sort" aria-label="Sort by">
+    {% for value, label in sort_choices %}<option value="{{ value }}"{% if params.sort == value %} selected{% endif %}>Sort: {{ label }}</option>{% endfor %}
+  </select>
+  <input type="submit" value="Show">
+  <a class="b-reset" href="{% url 'admin:ingredient_book' %}">Clear</a>
+</form>
+<div class="b-counts"><span class="b-badge">{{ rows|length }} shown of {{ total }}</span></div>
+
+<div class="b-table-wrap">
+<table class="b-table" id="ingredient-book">
+  <thead><tr><th>Ingredient</th><th>Category</th><th class="num">kcal</th><th class="num">Protein</th><th class="num">Carbs</th><th class="num">Fat</th><th class="num">Fibre</th><th class="num">1 cup</th><th class="num">1 piece</th><th class="num">Recipes</th><th>Notes</th></tr></thead>
+  <tbody>
+  {% for i in rows %}
+    <tr>
+      <td><span class="diet {{ i.diet }}"></span> <b>{{ i.name }}</b><div class="b-sub"><code>{{ i.id }}</code>{% if i.aliases %} · {{ i.aliases|truncatechars:60 }}{% endif %}</div></td>
+      <td>{{ i.category }}</td>
+      {% if i.n %}
+      <td class="num"><b>{{ i.n.kcal|floatformat:0 }}</b></td><td class="num">{{ i.n.protein|floatformat:1 }} g</td><td class="num">{{ i.n.carbs|floatformat:1 }} g</td>
+      <td class="num">{{ i.n.fat|floatformat:1 }} g</td><td class="num">{{ i.n.fibre|floatformat:1 }} g</td>
+      {% else %}
+      <td class="num" colspan="5"><span class="b-badge draft">No nutrition yet</span></td>
+      {% endif %}
+      <td class="num">{% if i.m.cup %}{{ i.m.cup|floatformat:0 }} g{% else %}–{% endif %}</td>
+      <td class="num">{% if i.m.piece %}{{ i.m.piece|floatformat:"-1" }} g{% else %}–{% endif %}</td>
+      <td class="num">{{ i.used }}</td>
+      <td>{% if i.admin %}<span class="b-badge custom">Added by admin</span> {% endif %}{% for a in i.allergens %}<span class="b-badge">{{ a }}</span> {% endfor %}{% if i.shelf %}<span class="b-sub">keeps ~{{ i.shelf }} days</span>{% endif %}</td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="11" class="b-empty">No ingredients match.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

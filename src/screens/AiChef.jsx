@@ -4,6 +4,7 @@ import { api, go, shrinkImage } from '../lib.js';
 
 export default function AiChef({ aiStatus, pantry, members, aiRecipes, setAiRecipes, addToPantry, notify }) {
   const [wish, setWish] = useState('');
+  const [meal, setMeal] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [scan, setScan] = useState(null); // {found: [], unknown: []}
@@ -30,8 +31,8 @@ export default function AiChef({ aiStatus, pantry, members, aiRecipes, setAiReci
     try {
       const data = await api('ai/invent', {
         pantry: pantry.map(p => ingName(p.id)),
-        household: members.map(m => ({ diet: m.diet, jain: m.jain, noOnionGarlic: m.noOnionGarlic, diabetic: m.diabetic, fasting: m.fasting, allergies: m.allergies, spice: m.spice })),
-        wish,
+        household: members.map(m => ({ diet: m.diet, jain: m.jain, noOnionGarlic: m.noOnionGarlic, diabetic: m.diabetic, fasting: m.fasting, allergies: m.allergies, spice: m.spice, age: m.age, goals: m.goals })),
+        wish, meal,
       });
       const recipe = data.recipe; // already checked and cleaned by Python (engine.normalize_ai_recipe)
       setAiRecipes({ ...aiRecipes, [recipe.id]: recipe });
@@ -57,7 +58,12 @@ export default function AiChef({ aiStatus, pantry, members, aiRecipes, setAiReci
       <Header title="✨ AI Chef" back />
       <div className="card">
         <h3>Invent a dish for me</h3>
-        <p className="muted small">Uses your {pantry.length} kitchen items{members.length ? ' and your family\'s needs' : ''}.</p>
+        <p className="muted small">Uses your {pantry.length} kitchen items{members.length ? ' and your family\'s needs' : ''}. Calories are worked out for you.</p>
+        <div className="chips wrap" role="group" aria-label="Meal">
+          {[['', 'Any meal'], ['breakfast', 'Breakfast'], ['lunch', 'Lunch'], ['dinner', 'Dinner'], ['snack', 'Snack']].map(([id, label]) => (
+            <button key={id || 'any'} type="button" className={'chip' + (meal === id ? ' on' : '')} aria-pressed={meal === id} onClick={() => setMeal(id)}>{label}</button>
+          ))}
+        </div>
         <textarea value={wish} onChange={e => setWish(e.target.value)} rows={2} placeholder="Optional: 'something with paneer under 20 min', 'Chettinad style', 'kid's tiffin'…" />
         <button className="btn primary" onClick={invent} disabled={!!busy || !pantry.length}>{busy === 'invent' ? 'Thinking up something tasty…' : 'Create a recipe'}</button>
         {!pantry.length && <p className="muted small">Add a few things to your kitchen first.</p>}

@@ -1,0 +1,23 @@
+{% extends "admin/base.html" %}
+{% load static %}
+{# Ballava's look for Django's admin portal: warm spice colours, a section bar, and light/dark themes. #}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | Ballava Admin{% endblock %}
+
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'kitchen/admin.css' %}">{% endblock %}
+
+{% block branding %}
+<div id="site-name">
+  <a href="{% url 'admin:index' %}" class="ballava-brand"><span class="ballava-mark" aria-hidden="true">B</span><span>Ballava <small>Admin</small></span></a>
+</div>
+{% if user.is_anonymous %}
+  {% include "admin/color_theme_toggle.html" %}
+{% endif %}
+{% endblock %}
+
+{% block nav-global %}{% endblock %}
+
+{% block nav-breadcrumbs %}
+  {% include "kitchen/admin_nav.html" %}
+  {{ block.super }}
+{% endblock %}

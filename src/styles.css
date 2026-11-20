@@ -272,6 +272,87 @@ details summary { cursor: pointer; font-weight: 600; margin-top: 8px; }
 /* Six tabs need a little less room each */
 .tabbar button { font-size: .7rem; min-width: 0; }
 
+/* ✨ Assistant: floating button on every screen, and the chat sheet */
+.fab { position: fixed; z-index: 15; right: max(16px, calc(50% - 280px + 16px)); bottom: calc(80px + env(safe-area-inset-bottom));
+  display: flex; align-items: center; gap: 4px; border: 0; border-radius: 999px; padding: 9px 13px 9px 11px; cursor: pointer; font-size: .9rem;
+  background: linear-gradient(135deg, var(--accent), #d0773e); color: #fff; font-weight: 700; box-shadow: 0 4px 14px rgba(143, 63, 30, .35); }
+.fab span:first-child { font-size: 1.05rem; }
+.fab:active { transform: scale(.96); }
+.app.no-nav .fab { bottom: calc(86px + env(safe-area-inset-bottom)); }
+.app.on-recipe .fab { bottom: calc(146px + env(safe-area-inset-bottom)); }
+.assistant-sheet { align-items: flex-end; }
+.sheet-inner.assistant { display: flex; flex-direction: column; height: min(88vh, 780px); padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); }
+.assistant-head { display: flex; align-items: center; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.assistant-mark { width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center; background: var(--accent-soft); font-size: 1.1rem; flex: none; }
+.assistant-title { flex: 1; min-width: 0; display: grid; }
+.assistant-title .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.assistant .chat { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 10px 2px; align-content: start; }
+.assistant .chat-form { margin-top: 6px; }
+.starters { padding-top: 4px; }
+.starters .chip { font-size: .85rem; min-height: 34px; padding: 5px 12px; }
+.assistant-sub { margin: -6px 0 10px; }
+.bubble { position: relative; }
+.bubble.bot { padding-right: 34px; }
+.bubble.error { background: var(--red-soft); color: #7c1d17; }
+.bubble-note { margin-top: 6px; font-size: .8rem; color: var(--muted); }
+.speak-btn { position: absolute; top: 6px; right: 4px; border: 0; background: none; cursor: pointer; font-size: .9rem; opacity: .55; padding: 2px; }
+.speak-btn:hover { opacity: 1; }
+.dish-chip { white-space: normal; text-align: left; }
+.dish-chip small { color: var(--muted); font-weight: 400; }
+.chat-recipe { margin-top: 8px; padding: 10px; border-radius: 12px; background: var(--accent-soft); display: grid; gap: 8px; white-space: normal; }
+.chat-action { margin-top: 8px; white-space: normal; text-align: left; }
+.chat-photo { cursor: pointer; }
+.typing { color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.dots { display: inline-flex; gap: 3px; }
+.dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: blink 1.2s infinite; }
+.dots i:nth-child(2) { animation-delay: .2s; } .dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+.ask-bar { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; border: 1.5px dashed #e3c2ad; background: var(--card);
+  color: var(--muted); border-radius: 999px; padding: 10px 14px; margin: 10px 0 4px; cursor: pointer; font-size: .9rem; }
+.ask-bar:hover { border-color: var(--accent); color: var(--accent-dark); }
+.home-head { align-items: center; }
+.home-actions { display: flex; gap: 6px; flex: none; }
+.home-actions .btn { white-space: nowrap; padding: 6px 10px; }
+
+/* ❤️ Saved dishes */
+.dish-wrap { position: relative; }
+.dish-wrap .dish-card { padding-right: 52px; }
+.save-btn { width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--card); box-shadow: var(--shadow); color: var(--muted);
+  font-size: 1.15rem; display: grid; place-items: center; cursor: pointer; flex: none; line-height: 1; }
+.save-btn.on { color: #d6336c; }
+.save-btn.corner { position: absolute; top: 8px; right: 8px; box-shadow: none; background: var(--bg); }
+.save-btn.big { width: 44px; height: 44px; font-size: 1.35rem; border-radius: 12px; }
+.save-btn:active { transform: scale(.9); }
+.saved-row { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 8px; scrollbar-width: none; }
+.saved-tile { position: relative; flex: none; width: 190px; }
+.saved-tile-btn { width: 100%; height: 100%; display: grid; gap: 2px; text-align: left; border: 0; border-radius: var(--radius); background: var(--card);
+  box-shadow: var(--shadow); padding: 12px 44px 12px 12px; cursor: pointer; align-content: start; }
+.saved-tile-btn b { display: flex; gap: 6px; align-items: center; font-size: .95rem; }
+.sort-row { margin: 10px 0; }
+
+/* Nutrition */
+.kcal { color: var(--accent-dark); font-weight: 600; }
+.nutrition { padding: 14px 16px; }
+.nutri-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.nutri-kcal { font-size: 2rem; color: var(--accent); font-family: var(--serif); }
+.nutri-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 10px 0 6px; }
+.nutri-tile { border-radius: 10px; padding: 8px 4px; text-align: center; background: var(--bg); }
+.nutri-tile b { display: block; font-size: 1.05rem; }
+.nutri-tile span { font-size: .72rem; color: var(--muted); }
+.nutri-tile.protein { background: var(--green-soft); } .nutri-tile.carbs { background: var(--amber-soft); }
+.nutri-tile.fat { background: var(--accent-soft); } .nutri-tile.fibre { background: var(--blue-soft); }
+.nutrition p { margin: 4px 0 0; }
+.line-kcal { display: block; font-size: .72rem; color: var(--muted); }
+.p-name { display: grid; }
+.p-kcal { font-size: .72rem; font-weight: 400; color: var(--muted); }
+.kcal-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; align-items: end; height: 150px; margin: 10px 0 4px; }
+.kcal-col { display: grid; grid-template-rows: auto 1fr auto; height: 100%; gap: 3px; text-align: center; min-width: 0; }
+.kcal-val { font-size: .68rem; color: var(--muted); }
+.kcal-bar { display: flex; align-items: flex-end; background: var(--bg); border-radius: 8px; overflow: hidden; }
+.kcal-bar span { display: block; width: 100%; background: linear-gradient(180deg, #e8955f, var(--accent)); border-radius: 8px 8px 0 0; min-height: 0; }
+.kcal-day { font-size: .7rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.diary-kcal { display: block; font-weight: 400; font-size: .7rem; color: var(--muted); }
+
 /* Admin portal */
 .admin { max-width: 1040px; margin: 0 auto; padding: 16px; }
 .admin-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }

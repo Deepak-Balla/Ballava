@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './lib.js';
 
-const KEYS = ['pantry', 'members', 'shopping', 'history', 'aiRecipes', 'filters', 'plan', 'pins', 'prefs'];
+const KEYS = ['pantry', 'members', 'shopping', 'history', 'aiRecipes', 'filters', 'plan', 'pins', 'prefs', 'savedDishes'];
 const PREFIX = 'ballava.';
 
 const read = (key, fallback) => {
@@ -22,7 +22,7 @@ const saveMeta = () => { write('_versions', sync.versions); write('_dirty', [...
 
 const ID_OF = {
   pantry: x => x.id, shopping: x => x.id, members: x => x.name,
-  history: x => x.id || `${x.at}:${x.name}`, pins: x => `${x.recipeId}:${x.weekday}`,
+  history: x => x.id || `${x.at}:${x.name}`, pins: x => `${x.recipeId}:${x.weekday}`, savedDishes: x => x.id,
 };
 
 // When two people changed the same thing, keep both sides. This device wins on the same item.

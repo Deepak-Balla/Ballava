@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { getCatalog, WEEKDAYS } from '../catalog.js';
-import { Header, DietDot, Spice, Stars, Empty, ingName } from '../ui.jsx';
+import { Header, DietDot, Spice, Stars, Empty, ingName, SaveButton, NutritionCard } from '../ui.jsx';
 import { go, whatsappLink, useBrain } from '../lib.js';
 import { t } from '../i18n.js';
 
-export default function Recipe({ recipe, pantry, addToShopping, notify, ratings, pins, setPins, family }) {
+export default function Recipe({ recipe, pantry, addToShopping, notify, ratings, pins, setPins, family, isSaved, toggleSave, openAssistant }) {
   const [weekday, setWeekday] = useState(0);
   // Python (kitchen/api.py -> recipe_info): can the family eat it, portion tips, and when it was last made.
   const info = useBrain('recipe', { ...family, recipeId: recipe?.id }, !!recipe);
@@ -18,7 +18,12 @@ export default function Recipe({ recipe, pantry, addToShopping, notify, ratings,
 
   return (
     <div className="screen recipe">
-      <Header title="" back right={<a className="icon-btn" href={whatsappLink(shareText)} target="_blank" rel="noreferrer" aria-label="Share on WhatsApp">⤴</a>} />
+      <Header title="" back right={(
+        <div className="row nowrap">
+          <SaveButton recipe={recipe} isSaved={isSaved} toggleSave={toggleSave} className="big" />
+          <a className="icon-btn" href={whatsappLink(shareText)} target="_blank" rel="noreferrer" aria-label="Share on WhatsApp">⤴</a>
+        </div>
+      )} />
       <h2 className="recipe-title"><DietDot diet={recipe.diet} /> {recipe.name}</h2>
       {recipe.alt && <p className="dish-alt">{recipe.alt}</p>}
       <div className="meta-row">
@@ -26,6 +31,11 @@ export default function Recipe({ recipe, pantry, addToShopping, notify, ratings,
       </div>
       <div className="tags">{recipe.tags.map(t => <span key={t} className="tag">{t.replace('-', ' ')}</span>)}</div>
       {ratings[recipe.id] && <div className="your-rating">Your rating <Stars value={ratings[recipe.id]} size="sm" /></div>}
+
+      <NutritionCard n={recipe.nutrition} />
+      <button className="ask-bar" onClick={openAssistant}>
+        <span aria-hidden="true">✨</span> <span>Ask about this dish: calories, swaps, a kid-friendly version…</span>
+      </button>
 
       {!house.ok && <div className="note bad">{house.reason}</div>}
       {house.ok && house.notes.map(n => <div key={n} className="note info">{n}</div>)}
@@ -45,11 +55,12 @@ export default function Recipe({ recipe, pantry, addToShopping, notify, ratings,
         {recipe.ingredients.map((it, i) => {
           const ok = it.options.some(id => have.has(id));
           const label = it.custom || it.options.map(ingName).join(' or ');
+          const kcal = recipe.nutrition?.lines?.[i]?.kcal;
           return (
             <li key={i} className={ok ? 'have' : it.optional ? 'opt' : 'miss'}>
               <span className="mark" aria-hidden="true">{ok ? '✓' : it.optional ? '·' : '✕'}</span>
               <span className="ing-label">{label}{it.optional && <em> (optional)</em>}</span>
-              <span className="qty">{it.qty}</span>
+              <span className="qty">{it.qty}{kcal >= 1 && <span className="line-kcal">≈ {kcal} kcal</span>}</span>
             </li>
           );
         })}

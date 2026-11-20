@@ -1,0 +1,94 @@
+{% extends "admin/base_site.html" %}
+{# One recipe, in full: what users see, with calories per ingredient, and buttons to edit or hide it. #}
+{% block breadcrumbs %}<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Home</a> &rsaquo; <a href="{% url 'admin:recipe_book' %}">Recipe book</a> &rsaquo; {{ e.r.name }}</div>{% endblock %}
+{% block content_title %}{% endblock %}
+
+{% block content %}
+{% with r=e.r n=e.r.nutrition %}
+<div class="b-detail-head">
+  <div>
+    <h2><span class="diet {{ r.diet }}" title="{{ e.diet_label }}"></span> {{ r.name }}</h2>
+    <p class="b-muted">{% if r.alt %}{{ r.alt }} · {% endif %}{{ r.cuisine }} · id <code>{{ r.id }}</code></p>
+    <div class="b-split"><span class="b-badge {{ e.source_key }}">{{ e.source }}</span><span class="b-badge {{ e.state }}">{{ e.status }}</span>{% if e.pending %}<span class="b-badge review">Edits waiting to be published</span>{% endif %}</div>
+  </div>
+  <div class="b-actions">
+    {% if can_change %}<a class="primary" href="{{ edit_url }}">✏️ {% if e.row %}Edit this recipe{% else %}Edit (makes your own copy){% endif %}</a>{% endif %}
+    {% if hidden_url %}<a href="{{ hidden_url }}">👁 Show to users again</a>{% elif hide_url and e.state != 'draft' %}<a href="{{ hide_url }}">🙈 Hide from users</a>{% endif %}
+    {% if e.state != 'draft' %}<a href="/#/recipe/{{ r.id }}" target="_blank" rel="noopener">📱 Open in the app</a>{% endif %}
+  </div>
+</div>
+{% if not e.row and can_change %}<p class="b-muted">Built-in recipes live in the app's code. "Edit" starts an admin copy with the same id; once it's published, users see your version instead.</p>{% endif %}
+
+<div class="b-grid">
+  <section class="b-card">
+    <h3>At a glance</h3>
+    <div class="b-facts">
+      <div class="b-fact"><span>Meals</span><b>{{ e.meals }}</b></div>
+      <div class="b-fact"><span>Time</span><b>{{ r.time }} min</b></div>
+      <div class="b-fact"><span>Serves</span><b>{{ r.serves }}</b></div>
+      <div class="b-fact"><span>Spice</span><b>{{ e.spice_label }}</b></div>
+      <div class="b-fact"><span>Diet</span><b>{{ e.diet_label }}</b></div>
+      <div class="b-fact"><span>Allergens</span><b>{{ r.allergens|join:", "|default:"None" }}</b></div>
+      <div class="b-fact"><span>Jain</span><b>{{ r.jainOk|yesno:"OK,Not Jain-friendly" }}</b></div>
+      <div class="b-fact"><span>Onion &amp; garlic</span><b>{{ r.needsOnionGarlic|yesno:"Needed,Not needed" }}</b></div>
+    </div>
+    <p class="b-muted" style="margin-top:10px">Tags: {% for t in r.tags %}<span class="b-badge">{{ t }}</span> {% empty %}none{% endfor %}</p>
+  </section>
+
+  <section class="b-card">
+    <h3>Nutrition per serving (approx.)</h3>
+    {% if n %}
+    <div class="b-nutri">
+      <div><b>{{ n.kcal }}</b><span>kcal</span></div>
+      <div><b>{{ n.protein|floatformat:0 }} g</b><span>Protein</span></div>
+      <div><b>{{ n.carbs|floatformat:0 }} g</b><span>Carbs</span></div>
+      <div><b>{{ n.fat|floatformat:0 }} g</b><span>Fat</span></div>
+      <div><b>{{ n.fibre|floatformat:0 }} g</b><span>Fibre</span></div>
+    </div>
+    <p class="b-muted">Whole dish ≈ {{ n.totalKcal }} kcal, serves {{ n.serves }}.{% if n.oilTsp %} Includes about {{ n.oilTsp }} tsp of cooking oil per serving, because the steps fry or temper.{% endif %} Optional items aren't counted.{% if n.unknown %} Not counted (no data): {{ n.unknown|join:", " }}.{% endif %}</p>
+    {% endif %}
+  </section>
+</div>
+
+{% if problems %}<div class="b-note bad"><b>Can't be published yet:</b> {{ problems|join:"; " }}</div>{% endif %}
+{% if r.prep %}<div class="b-note warn"><b>Plan ahead:</b> {{ r.prep }}</div>{% endif %}
+{% if r.safety %}<div class="b-note bad"><b>Food safety:</b> {{ r.safety }}</div>{% endif %}
+{% if r.tip %}<div class="b-note info"><b>Tip:</b> {{ r.tip }}</div>{% endif %}
+
+<div class="b-grid">
+  <section class="b-card">
+    <h3>Ingredients</h3>
+    <div class="b-table-wrap" style="box-shadow:none">
+    <table class="b-table">
+      <thead><tr><th>Ingredient</th><th>Quantity</th><th class="num">≈ Grams</th><th class="num">≈ kcal</th></tr></thead>
+      <tbody>
+      {% for row in lines %}
+        <tr>
+          <td>{{ row.label }}{% if row.optional %} <span class="b-badge">optional</span>{% endif %}{% if row.unknown %} <span class="b-badge draft">not in the ingredient list</span>{% endif %}<div class="b-sub"><code>{{ row.ids }}</code></div></td>
+          <td>{{ row.qty|default:"–" }}</td>
+          <td class="num">{{ row.grams|default:"–" }}</td>
+          <td class="num">{{ row.kcal|default:"–" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section class="b-card">
+    <h3>Steps</h3>
+    <ol class="b-steps">
+      {% for s in r.steps %}<li>{{ s.text }}{% if s.minutes %}<span class="b-pill">⏱ {{ s.minutes }} min</span>{% endif %}{% if s.whistles %}<span class="b-pill">{{ s.whistles }} whistles</span>{% endif %}</li>{% endfor %}
+    </ol>
+  </section>
+</div>
+
+{% if e.row %}
+<section class="b-card">
+  <h3>Admin version</h3>
+  <p>Status: <b>{{ e.row.get_status_display }}</b> · last edited {{ e.row.updated_at|timesince }} ago.
+  {% if e.pending %}Users still see the last published version until you publish again (select it in <a href="{% url 'admin:kitchen_recipe_changelist' %}">New &amp; edited recipes</a> and use the actions menu).{% endif %}</p>
+</section>
+{% endif %}
+{% endwith %}
+{% endblock %}

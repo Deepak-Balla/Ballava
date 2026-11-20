@@ -38,7 +38,7 @@ class Profile(models.Model):
 class FamilyData(models.Model):
     """One piece of a family's data, e.g. key='pantry'. `version` goes up on every save, so two phones
     editing at once can be detected and merged instead of one overwriting the other."""
-    KEYS = ['pantry', 'members', 'shopping', 'history', 'aiRecipes', 'filters', 'plan', 'pins', 'prefs']
+    KEYS = ['pantry', 'members', 'shopping', 'history', 'aiRecipes', 'filters', 'plan', 'pins', 'prefs', 'savedDishes']
     household = models.ForeignKey(Household, on_delete=models.CASCADE, related_name='data')
     key = models.CharField(max_length=20)
     value = models.JSONField()
@@ -154,14 +154,26 @@ class Ingredient(models.Model):
     aliases = models.TextField('Other names', blank=True, help_text='Comma separated, in any language people type.')
     allergens = models.CharField(max_length=100, blank=True, help_text='Comma separated: dairy, gluten, nuts, egg, seafood')
     diet = models.CharField(max_length=6, default='veg', choices=[('veg', 'Vegetarian'), ('egg', 'Egg'), ('nonveg', 'Meat or fish')])
+    # Nutrition per 100 g (optional). With these filled in, recipes that use this ingredient count its calories.
+    kcal = models.FloatField('Calories (kcal)', null=True, blank=True, help_text='Per 100 g, as it goes into the pot (dry for dals and flours).')
+    protein = models.FloatField('Protein (g)', null=True, blank=True)
+    carbs = models.FloatField('Carbs (g)', null=True, blank=True)
+    fat = models.FloatField('Fat (g)', null=True, blank=True)
+    fibre = models.FloatField('Fibre (g)', null=True, blank=True)
+    grams_per_cup = models.FloatField('Grams in 1 cup', null=True, blank=True, help_text='A 240 ml cup, filled as usual (chopped, grated, loose).')
+    grams_per_piece = models.FloatField('Grams in 1 piece', null=True, blank=True, help_text='One medium item, if it is counted in pieces.')
 
     def __str__(self):
         return self.name
 
     def to_raw(self):
         split = lambda s: [x.strip() for x in s.split(',') if x.strip()]  # noqa: E731
-        return {'id': self.ingredient_id, 'name': self.name, 'category': self.category, 'shelfDays': self.shelf_days,
-                'aliases': split(self.aliases), 'allergens': split(self.allergens), 'diet': self.diet}
+        raw = {'id': self.ingredient_id, 'name': self.name, 'category': self.category, 'shelfDays': self.shelf_days,
+               'aliases': split(self.aliases), 'allergens': split(self.allergens), 'diet': self.diet}
+        if self.kcal is not None:
+            raw['nutrition'] = {'kcal': self.kcal, 'protein': self.protein or 0, 'carbs': self.carbs or 0, 'fat': self.fat or 0, 'fibre': self.fibre or 0}
+        raw['measures'] = {k: v for k, v in {'cup': self.grams_per_cup, 'piece': self.grams_per_piece}.items() if v}
+        return raw
 
 
 class Rescue(models.Model):

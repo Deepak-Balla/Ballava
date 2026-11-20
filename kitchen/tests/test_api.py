@@ -211,6 +211,12 @@ class FakeGemini:
         self.calls, self.text, self.error, self.blocked, self.finish = [], text, error, blocked, finish
         self.models = self
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
     def generate_content(self, *, model, contents, config):
         self.calls.append({'model': model, 'contents': contents, 'config': config})
         if self.error:
@@ -263,11 +269,36 @@ def test_gemini_invent_and_scan(api, gemini, settings):
     assert photo.inline_data.data == b'hello' and photo.inline_data.mime_type == 'image/jpeg'
 
 
-def test_real_gemini_client_can_be_built(monkeypatch, settings):
+def test_real_gemini_library_sends_the_request(api, monkeypatch, settings):
+    """Goes through Google's real library; only the internet is replaced by a stand-in."""
     from google import genai
+    seen = []
+
+    def fake_internet(request):
+        seen.append(request)
+        reply = {'candidates': [{'content': {'role': 'model', 'parts': [{'text': '{"ingredients": ["tomato", "onion"]}'}]},
+                                 'finishReason': 'STOP'}]}
+        return httpx.Response(200, json=reply)
+
+    real_client = genai.Client
+
+    def client_with_fake_internet(**kw):
+        kw['http_options'].client_args = {'transport': httpx.MockTransport(fake_internet)}
+        return real_client(**kw)
+
     settings.AI_PROVIDER = 'gemini'
     monkeypatch.setenv('GEMINI_API_KEY', 'test-key')
-    assert isinstance(ai._gemini_client(), genai.Client)
+    monkeypatch.setattr(ai.genai, 'Client', client_with_fake_internet)
+    status, scan = api.post_json('ai/scan', {'image': 'aGVsbG8=', 'mediaType': 'image/jpeg'})
+    assert status == 200, scan
+    assert sorted(scan['found']) == ['onion', 'tomato']
+    request = seen[0]
+    assert f'models/{settings.GEMINI_MODEL}:generateContent' in str(request.url)
+    assert request.headers.get('x-goog-api-key') == 'test-key'
+    body = json.loads(request.content)
+    assert 'ingredients' in body['systemInstruction']['parts'][0]['text']
+    photo = body['contents'][0]['parts'][0]['inlineData']
+    assert photo['data'] == 'aGVsbG8=' and 'image/jpeg' in photo.values()
 
 
 def gemini_error(cls, code, message='error'):
@@ -287,6 +318,93 @@ def test_gemini_errors_are_reported_politely(api, gemini, error, status, message
     gemini(error=error)
     code, body = api.post_json('ai/invent', {'pantry': ['egg']})
     assert code == status and message in body['error']
+
+
+# ---------------------------------------------------------------- the assistant (chat on every screen)
+VEG_FAMILY = {'members': [{'name': 'Amma', 'diet': 'veg', 'diabetic': True, 'allergies': ['nuts']}],
+              'pantry': [{'id': 'paneer'}, {'id': 'spinach'}, {'id': 'onion'}], 'savedDishes': [{'id': 'palak_paneer', 'at': 1}]}
+
+
+def chat_answer(**over):
+    return json.dumps({'reply': 'Try **Palak Paneer** tonight.', 'dishes': ['palak_paneer', 'made_up_dish'], 'recipe': None,
+                       'shopping': ['tomatoes', 'unicorn dust'], **over})
+
+
+def test_chat_without_ai_still_answers(api):
+    status, body = api.post_json('ai/chat', {'text': 'How many calories in dal tadka?', **VEG_FAMILY})
+    assert status == 200 and body['source'] == 'builtin' and 'kcal per serving' in body['reply']
+    assert api.post_json('ai/chat', {'text': '  '})[0] == 400
+
+
+def test_chat_with_gemini_knows_the_family_and_is_checked(api, gemini):
+    fake = gemini(text=chat_answer())
+    history = [{'from': 'bot', 'text': 'Hi! Ask me anything.'}, {'from': 'me', 'text': 'Hello'}, {'from': 'bot', 'text': 'Hello! How can I help?'}]
+    status, body = api.post_json('ai/chat', {'text': 'What should I cook tonight?', 'messages': history, 'screen': 'recipe',
+                                             'recipeId': 'dal_tadka', **VEG_FAMILY})
+    assert status == 200 and body['source'] == 'ai'
+    assert body['reply'] == 'Try Palak Paneer tonight.', 'markdown is removed'
+    assert body['dishes'] == ['palak_paneer'], 'made-up recipe ids are dropped'
+    assert body['shopping'] == ['tomato'], 'shopping items are matched to real ingredients'
+    call = fake.calls[0]
+    system = call['config'].system_instruction
+    assert 'RECIPE BOOK' in system and 'Paneer' in system and 'Dal Tadka (id dal_tadka)' in system
+    assert 'vegetarian, diabetic, allergic to nuts' in system and 'Amma' not in system, 'family needs are sent, names are not'
+    assert 'chicken_curry' not in system, 'only dishes that suit this family are offered to the AI'
+    assert 'Saved (favourite) dishes: Palak Paneer' in system
+    roles = [c.role for c in call['contents']]
+    assert roles == ['model', 'user', 'model', 'user'] and call['contents'][-1].parts[0].text == 'What should I cook tonight?'
+
+
+def test_chat_drops_new_recipes_that_break_family_rules(api, gemini):
+    chicken = {'name': 'Quick Chicken Fry', 'diet': 'nonveg', 'ingredients': [{'name': 'Chicken', 'quantity': '500 g'}],
+               'steps': ['Fry the chicken until cooked through.', 'Serve hot.']}
+    gemini(text=chat_answer(recipe=chicken, dishes=[]))
+    body = api.post_json('ai/chat', {'text': 'Invent a new dinner', **VEG_FAMILY})[1]
+    assert body['recipe'] is None and "doesn't suit your family" in body['reply']
+    veg = {**chicken, 'name': 'Paneer Saag Toast', 'diet': 'veg', 'ingredients': [{'name': 'Paneer', 'quantity': '100 g'}, {'name': 'Spinach', 'quantity': '1 cup'}]}
+    gemini(text=chat_answer(recipe=veg, dishes=[]))
+    body = api.post_json('ai/chat', {'text': 'Invent a new dinner', **VEG_FAMILY})[1]
+    assert body['recipe']['name'] == 'Paneer Saag Toast' and body['recipe']['nutrition']['kcal'] > 0
+
+
+def test_chat_survives_messy_ai_answers(api, gemini):
+    gemini(text='Sure! {"reply": "Make Palak Paneer.", "dishes": ["palak_paneer"],} Enjoy!')  # trailing comma, text around it
+    body = api.post_json('ai/chat', {'text': 'dinner?', **VEG_FAMILY})[1]
+    assert body['reply'] == 'Make Palak Paneer.' and body['dishes'] == ['palak_paneer']
+    gemini(text='Palak Paneer would be lovely tonight.')  # plain text, no JSON at all
+    body = api.post_json('ai/chat', {'text': 'dinner?', **VEG_FAMILY})[1]
+    assert body['reply'].startswith('Palak Paneer') and body['dishes'] == ['palak_paneer'], 'dish names in the text become buttons'
+
+
+def test_chat_falls_back_when_the_ai_is_busy(api, gemini):
+    gemini(error=gemini_error(gemini_errors.ClientError, 429))
+    body = api.post_json('ai/chat', {'text': 'How many calories in dal tadka?', **VEG_FAMILY})[1]
+    assert body['source'] == 'builtin' and 'free AI limit' in body['note'] and 'kcal' in body['reply']
+
+
+def test_chat_with_claude_sends_the_conversation(api, claude):
+    fake = claude(text=chat_answer())
+    history = [{'from': 'bot', 'text': 'Hi!'}, {'from': 'me', 'text': 'Hello'}, {'from': 'bot', 'text': 'Hello there'}]
+    body = api.post_json('ai/chat', {'text': 'Dinner idea?', 'messages': history, **VEG_FAMILY})[1]
+    assert body['source'] == 'ai' and body['dishes'] == ['palak_paneer']
+    roles = [m['role'] for m in fake.calls[0]['messages']]
+    assert roles == ['user', 'assistant', 'user'], 'starts with the user, so the greeting is left out'
+
+
+def test_ai_chef_asks_again_when_a_dish_breaks_a_family_rule(api, gemini):
+    chicken = json.dumps({'name': 'Chicken Fry', 'ingredients': [{'name': 'chicken', 'quantity': '500 g'}], 'steps': ['Fry well.', 'Serve hot.']})
+    fake = gemini(text=chicken)
+    status, body = api.post_json('ai/invent', {'pantry': ['Chicken'], 'household': [{'diet': 'veg'}]})
+    assert status == 502 and "didn't suit your family" in body['error'] and len(fake.calls) == 2
+    assert 'rejected because' in fake.calls[1]['contents'][0]
+
+
+def test_saved_dishes_count_as_liked(api):
+    pantry = [{'id': i} for i in ['paneer', 'spinach', 'onion', 'tomato', 'ginger', 'garlic', 'green_chilli', 'cumin', 'garam_masala']]
+    plain = api.post_json('brain/home', {'pantry': pantry})[1]['ready']
+    liked = api.post_json('brain/home', {'pantry': pantry, 'savedDishes': [{'id': 'palak_paneer', 'at': 1}]})[1]['ready']
+    rank = lambda rows: next(r['rank'] for r in rows if r['recipe'] == 'palak_paneer')  # noqa: E731
+    assert rank(liked) > rank(plain)
 
 
 def test_gemini_refusal_and_cut_off_answers(api, gemini):

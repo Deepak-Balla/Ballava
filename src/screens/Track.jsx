@@ -51,7 +51,17 @@ function QuickLog({ recipes, plan, logMeal, notify, log }) {
 
 const EMPTY = { total: 0, weekCount: 0, variety: null, groups: {}, insights: [], byDay: {}, top: [], saved: 0 };
 
-export default function Track({ history, setHistory, log, logMeal, plan, aiRecipes, catalog, notify }) {
+// Calories for one serving of each logged dish (dishes from outside or typed by name aren't counted).
+function dayKcal(items, findRecipe) {
+  let kcal = 0, counted = 0;
+  for (const e of items || []) {
+    const n = e.recipeId && findRecipe(e.recipeId)?.nutrition;
+    if (n?.kcal != null) { kcal += n.kcal; counted += 1; }
+  }
+  return { kcal, counted, all: (items || []).length };
+}
+
+export default function Track({ history, setHistory, log, logMeal, plan, aiRecipes, catalog, notify, findRecipe }) {
   const [offset, setOffset] = useState(0);
   const recipes = useMemo(() => {
     const hidden = new Set(catalog.hidden);
@@ -104,6 +114,29 @@ export default function Track({ history, setHistory, log, logMeal, plan, aiRecip
         </div>
       )}
 
+      {d.total > 0 && (() => {
+        const days = week.slice().reverse().map(date => ({ date, ...dayKcal(d.byDay[date], findRecipe) }));
+        const logged = days.filter(x => x.counted);
+        if (!logged.length) return null;
+        const top = Math.max(...days.map(x => x.kcal), 1);
+        const avg = Math.round(logged.reduce((s, x) => s + x.kcal, 0) / logged.length);
+        return (
+          <div className="card kcal-card">
+            <div className="row between"><h3>🔥 Calories</h3><span className="muted small">avg {avg} kcal on days with meals logged</span></div>
+            <div className="kcal-bars" role="img" aria-label={`Calories per day: ${days.map(x => `${x.date.slice(5)} ${x.kcal}`).join(', ')}`}>
+              {days.map(x => (
+                <div key={x.date} className="kcal-col">
+                  <span className="kcal-val">{x.kcal ? x.kcal : ''}</span>
+                  <span className="kcal-bar"><span style={{ height: `${(x.kcal / top) * 100}%` }} /></span>
+                  <span className="kcal-day">{x.date === today ? 'Today' : WEEKDAYS[new Date(x.date + 'T12:00:00').getDay()]}</span>
+                </div>
+              ))}
+            </div>
+            <p className="muted small">One serving of each dish you logged, so it's a rough guide per person. Meals typed by name or eaten out aren't counted.</p>
+          </div>
+        );
+      })()}
+
       <div className="row between week-nav">
         <button className="btn link" onClick={() => setOffset(offset + 1)}>‹ Earlier</button>
         <b>{offset === 0 ? 'Last 7 days' : `${week[6].slice(5)} to ${week[0].slice(5)}`}</b>
@@ -117,7 +150,7 @@ export default function Track({ history, setHistory, log, logMeal, plan, aiRecip
             const label = date === today ? 'Today' : WEEKDAYS[new Date(date + 'T12:00:00').getDay()] + ' ' + date.slice(8);
             return (
               <div key={date} className="diary-day">
-                <span className="diary-date">{label}</span>
+                <span className="diary-date">{label}{dayKcal(items, findRecipe).kcal > 0 && <span className="diary-kcal">≈{dayKcal(items, findRecipe).kcal} kcal</span>}</span>
                 <div className="diary-items">
                   {items.length === 0 && <span className="muted small">Nothing logged</span>}
                   {items.map(e => (
