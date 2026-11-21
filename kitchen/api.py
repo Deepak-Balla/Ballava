@@ -7,6 +7,7 @@ Two groups:
 import functools
 import json
 import logging
+import re
 import secrets
 from datetime import timedelta
 
@@ -21,7 +22,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 
 from . import ai, assistant, catalog, engine, planner
-from .models import AiUsage, FamilyData, Household, Poll, Profile, Vote
+from .models import AiUsage, ChatThread, FamilyData, Household, Poll, Profile, Vote
 from .security import ApiError, auth_config, check_code, clear_limit, client_ip, limited, request_code
 
 log = logging.getLogger('kitchen')
@@ -280,7 +281,7 @@ def export_account(request, body):
     user = require_user(request)
     polls = list(Poll.objects.filter(household=user.profile.household).values('title', 'date', 'slot', 'options'))
     return {'exportedAt': timezone.now().isoformat(), 'account': public_user(user), 'household': household_info(user),
-            'data': read_state(user)['items'], 'polls': polls}
+            'data': read_state(user)['items'], 'polls': polls, 'chats': [chat_json(t) for t in user.chats.all()]}
 
 
 @endpoint()
@@ -294,6 +295,63 @@ def delete_account(request, body):
         user.delete()
         if orphan:
             orphan.delete()
+    return {'ok': True}
+
+
+# ---------------------------------------------------------------- Ballava Chef: your saved chats
+MAX_CHATS, MAX_CHAT_MESSAGES = 50, 100
+CHAT_ID = re.compile(r'[a-z0-9]{4,40}')
+# What a saved message may hold (the same fields the phone shows). Anything else is dropped.
+MESSAGE_TEXT = {'from': 10, 'text': 4000, 'recipeId': 60, 'warning': 200, 'source': 20, 'note': 300}
+MESSAGE_LISTS = {'dishes': 60, 'shopping': 60, 'followups': 80, 'found': 60}
+
+
+def clean_message(m):
+    if not isinstance(m, dict) or m.get('from') not in ('me', 'bot'):
+        return None
+    out = {k: str(m[k])[:n] for k, n in MESSAGE_TEXT.items() if m.get(k) not in (None, '')}
+    out.update({k: [str(x)[:n] for x in m[k][:15]] for k, n in MESSAGE_LISTS.items() if isinstance(m.get(k), list) and m[k]})
+    for k in ('error', 'done'):
+        if m.get(k) is True:
+            out[k] = True
+    if isinstance(m.get('at'), (int, float)):
+        out['at'] = int(m['at'])
+    return out
+
+
+def chat_json(thread):
+    return {'id': thread.chat_id, 'title': thread.title, 'at': thread.at, 'messages': thread.messages}
+
+
+@endpoint(methods=('GET', 'POST'), limit=STATE)
+def chats(request, body):
+    """GET: your saved chats with Ballava Chef, newest first. POST {id, title, at, messages}: save one."""
+    user = require_user(request)
+    if request.method == 'GET':
+        return {'chats': [chat_json(t) for t in user.chats.all()[:MAX_CHATS]]}
+    chat_id = str(body.get('id') or '')
+    if not CHAT_ID.fullmatch(chat_id):
+        raise ApiError(400, 'Unknown chat.')
+    messages = [m for m in map(clean_message, _list(body.get('messages'))[-MAX_CHAT_MESSAGES:]) if m]
+    try:
+        at = int(body.get('at') or 0)
+    except (TypeError, ValueError):
+        at = 0
+    thread, _ = ChatThread.objects.update_or_create(user=user, chat_id=chat_id, defaults={
+        'title': str(body.get('title') or 'Chat')[:80], 'at': at, 'messages': messages})
+    for old in user.chats.all()[MAX_CHATS:]:  # keep the newest 50
+        old.delete()
+    return {'ok': True, 'id': thread.chat_id}
+
+
+@endpoint()
+def delete_chats(request, body):
+    """{id}: delete one chat. {all: true}: delete them all."""
+    user = require_user(request)
+    if body.get('all') is True:
+        user.chats.all().delete()
+    else:
+        user.chats.filter(chat_id=str(body.get('id') or '')).delete()
     return {'ok': True}
 
 

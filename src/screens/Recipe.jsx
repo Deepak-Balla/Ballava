@@ -24,6 +24,8 @@ export default function Recipe({ recipe, pantry, addToShopping, notify, ratings,
           <a className="icon-btn" href={whatsappLink(shareText)} target="_blank" rel="noreferrer" aria-label="Share on WhatsApp">⤴</a>
         </div>
       )} />
+      <div className="recipe-cols">
+      <div className="recipe-left">
       <h2 className="recipe-title"><DietDot diet={recipe.diet} /> {recipe.name}</h2>
       {recipe.alt && <p className="dish-alt">{recipe.alt}</p>}
       <div className="meta-row">
@@ -34,7 +36,7 @@ export default function Recipe({ recipe, pantry, addToShopping, notify, ratings,
 
       <NutritionCard n={recipe.nutrition} />
       <button className="ask-bar" onClick={openAssistant}>
-        <span aria-hidden="true">✨</span> <span>Ask about this dish: calories, swaps, a kid-friendly version…</span>
+        <span aria-hidden="true">🧑‍🍳</span> <span>Ask Chef about this dish: calories, swaps, a kid-friendly version…</span>
       </button>
 
       {!house.ok && <div className="note bad">{house.reason}</div>}
@@ -49,7 +51,9 @@ export default function Recipe({ recipe, pantry, addToShopping, notify, ratings,
       {recipe.prep && <div className="note warn"><b>Plan ahead:</b> {recipe.prep}</div>}
       {recipe.safety && <div className="note bad"><b>Food safety:</b> {recipe.safety}</div>}
       {recipe.tip && <div className="note info"><b>Tip:</b> {recipe.tip}</div>}
+      </div>
 
+      <div className="recipe-right">
       <h3 className="section-title">Ingredients</h3>
       <ul className="ing-list">
         {recipe.ingredients.map((it, i) => {
@@ -87,6 +91,8 @@ export default function Recipe({ recipe, pantry, addToShopping, notify, ratings,
           if (!pins.some(p => p.recipeId === recipe.id && p.weekday === weekday)) setPins([...pins, { recipeId: recipe.id, weekday, slot: recipe.meal.includes('lunch') ? 'lunch' : recipe.meal[0] }]);
           notify(`${recipe.name} is now your ${WEEKDAYS[weekday]} favourite`);
         }}>⭐ Pin</button>
+      </div>
+      </div>
       </div>
 
       <div className="sticky-cta">

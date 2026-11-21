@@ -140,6 +140,7 @@ export default function Plan({ pantry, log, plan, setPlan, pins, setPins, prefs,
 
       {!planned && <Empty title="No plan yet">Tap the button above. Ballava plans 7 days of meals around your kitchen, your family's diets and what you ate recently.</Empty>}
 
+      <div className="plan-grid">
       {planned && days.map(date => {
         const day = plan[date];
         if (!day) return null;
@@ -160,6 +161,7 @@ export default function Plan({ pantry, log, plan, setPlan, pins, setPins, prefs,
           </section>
         );
       })}
+      </div>
 
       {planned && (
         <div className="card">

@@ -13,10 +13,10 @@ export default function AiChef({ aiStatus, pantry, members, aiRecipes, setAiReci
   if (!aiStatus.ai) {
     return (
       <div className="screen">
-        <Header title="✨ AI Chef" back />
+        <Header title="✨ Recipe Studio" back="more" />
         <div className="card">
-          <h3>AI Chef is switched off</h3>
-          <p>Everything else in Ballava works without AI. The AI Chef adds two extras:</p>
+          <h3>Recipe Studio needs AI</h3>
+          <p>Everything else in Ballava works without AI. Recipe Studio adds:</p>
           <ul><li>Inventing brand-new dishes from exactly what's in your kitchen</li><li>Reading a photo of your fridge or shelf</li></ul>
           {aiStatus.server
             ? <p className="muted small">For the app owner: in the <code>.env</code> file, choose the AI with <code>AI_PROVIDER</code> (gemini or claude), add its key (<code>GEMINI_API_KEY</code> or <code>ANTHROPIC_API_KEY</code>), and restart the server. See the guide, step 8.</p>
@@ -60,7 +60,7 @@ export default function AiChef({ aiStatus, pantry, members, aiRecipes, setAiReci
 
   return (
     <div className="screen">
-      <Header title="✨ AI Chef" back />
+      <Header title="✨ Recipe Studio" back="more" />
       <div className="card">
         <h3>Get any recipe, or invent one</h3>
         <p className="muted small">Name a dish ("chicken biryani") and you get exactly that recipe, with what you're missing. Or leave it empty to invent something from your kitchen.</p>

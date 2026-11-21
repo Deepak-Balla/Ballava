@@ -12,10 +12,10 @@ Ballava is a web app that runs in any browser and installs on a phone like a nor
 - **food diary and dashboard**: logs what you made and spots what's missing, like greens or protein
 - tiffin planner, prep reminders, leftover ideas and fasting days
 - guides you while cooking: big steps, timers, a **pressure-cooker whistle counter**, read-aloud and hands-free voice
-- **Bachao!** mode rescues dishes (too salty, burnt, split kadhiâ€¦) and says honestly when food isn't safe
+- **Bachao!** mode rescues dishes (too salty, burnt, split kadhi…) and says honestly when food isn't safe
 - **family accounts**: one shared kitchen, plan and list across phones, by family code
 - **admin portal** at `/admin` for recipes, ingredients, Bachao fixes, announcements and festivals
-- optional **AI Chef**: invents new dishes and reads a photo of your fridge (needs an AI key)
+- optional AI (needs an AI key): **Ballava Chef**, a chat for any recipe by name, calories and swaps, and **Recipe Studio**, which gets or invents a recipe and reads a photo of your fridge
 
 **The app is written in Python (Django).** Only the phone screens are JavaScript (React), because browsers can only run JavaScript.
 
@@ -25,14 +25,14 @@ Ballava is a web app that runs in any browser and installs on a phone like a nor
 
 | Tool | What it is | What it does in Ballava | Where |
 |---|---|---|---|
-| **Python** | The programming language | All the thinking: matching dishes, weekly plans, no-repeat rules, family diets, the dashboard, Ask Ballava | `kitchen/engine.py`, `kitchen/planner.py` |
+| **Python** | The programming language | All the thinking: matching dishes, weekly plans, no-repeat rules, family diets, the dashboard, Chef's built-in answers | `kitchen/engine.py`, `kitchen/planner.py` |
 | **Django** | Python's most popular web framework | The web server, the API the phone screens call, sign-in, the database layer and the **admin portal** | `config/`, `kitchen/` |
 | **Django admin** | The admin portal that comes with Django | Lets admins add recipes, ingredients, fixes, announcements and festivals, and manage users | `/admin`, set up in `kitchen/admin.py` |
 | **SQLite** | A database stored in one file | Keeps accounts and each family's data | `data/db.sqlite3` (**back this up**) |
 | **pytest** | Python's test runner | Runs over 150 automatic checks | `kitchen/tests/` |
 | **Playwright** | Remote control for a real browser | Opens Chrome and clicks through the whole app like a person | `kitchen/tests/test_e2e_*.py` |
-| **google-genai** | Google's official Python library | Talks to Gemini for AI Chef when `AI_PROVIDER=gemini` | `kitchen/ai.py` |
-| **anthropic** | Anthropic's official Python library | Talks to Claude for AI Chef when `AI_PROVIDER=claude` | `kitchen/ai.py` |
+| **google-genai** | Google's official Python library | Talks to Gemini for Ballava Chef and Recipe Studio when `AI_PROVIDER=gemini` | `kitchen/ai.py` |
+| **anthropic** | Anthropic's official Python library | Talks to Claude for Ballava Chef and Recipe Studio when `AI_PROVIDER=claude` | `kitchen/ai.py` |
 | **WhiteNoise** | A small Django add-on | Serves the phone app's files quickly | `config/settings.py` |
 | **React** (JavaScript) | A library for building screens | Every button and screen on the phone. It asks Python whenever it needs thinking done | `src/` |
 | **Node.js + esbuild** | JavaScript tools | Packs `src/` into `dist/`. **Only needed if you change the screens** | `build.mjs`, `package.json` |
@@ -84,7 +84,11 @@ Then open **http://localhost:8000** (the app) or **http://localhost:8000/admin**
 
 **The sign-in page has three tabs:** **Sign in** and **Create account** (by email, or by phone when SMS is set up) for families, and **Admin**, which signs admins straight into the admin portal.
 
-**The navigation bar:** **Cook** (what to cook now) Â· **Plan** (the week) Â· **Kitchen** (what you have) Â· **âœ¨ AI** (in the middle: opens the AI window on any screen) Â· **List** (shopping) Â· **Dashboard** (calories, every meal with its calories, and the food diary) Â· **More** (saved dishes, family, Bachao, AI Chef, account).
+**The app opens on the Dashboard**, which greets you by name ("Good morning, Deepak"; guests can tell it their name) and shows today's menu, shortcuts, what to use up soon and your calories.
+
+**The navigation bar:** **Dashboard** (the first screen: greeting, today, calories, every meal with its calories, and the food diary) · **Cook** (what to cook now) · **Plan** (the week) · **🧑‍🍳 Chef** (in the middle: your AI chef, on any screen) · **Kitchen** (what you have) · **List** (shopping) · **More** (saved dishes, family, Bachao, Recipe Studio, account).
+
+**On a computer** the bar becomes a sidebar on the left, pages use the full width (dishes and plans in several columns, recipes with ingredients and steps beside the details), and on wide screens Chef opens as a panel docked on the right. Phones look the same as before.
 
 ## 4. Admin logins and passwords
 
@@ -110,14 +114,14 @@ After 5 wrong admin passwords, that login is locked for 15 minutes.
 .venv\Scripts\python -m pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest
 ```
-This runs **179 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `179 passed`. The tests never call a real AI or use your keys.
+This runs **183 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `183 passed`. The tests never call a real AI or use your keys.
 
 **Real-browser checks (about a minute):**
 ```
 .venv\Scripts\python -m playwright install chromium
 .venv\Scripts\python -m pytest -m e2e
 ```
-This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, vote, and publish a recipe as an admin. Screenshots go to `test-screenshots/`. You should see `42 passed`.
+This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, vote, and publish a recipe as an admin. Screenshots go to `test-screenshots/`. You should see `45 passed`.
 
 ## 6. Run Ballava with Docker (optional)
 
@@ -149,16 +153,16 @@ What the Docker setup does: it builds the phone screens with Node.js, installs P
 ## 8. Switch on AI (optional)
 
 **What AI adds:**
-- **Ballava AI (the âœ¨ button in the middle of the navigation bar, on every screen):** a short chat window that knows your kitchen, your family's needs (without their names), recent meals, the plan, your saved dishes and the whole recipe book with calories. It also knows which screen and recipe you're on.
-  - **Ask for any dish by name and you get exactly that dish.** "Chicken biryani" gives chicken biryani, never something else. If it's in the recipe book you get that recipe; if not, the AI writes it. Either way you see **what you're missing**, with **ðŸ›’ Add missing** for your shopping list. If it breaks a family rule (for example meat for a vegetarian), you still get it, with a clear warning.
-  - Every answer's dishes come with **Open recipe**, **ðŸ›’ Add missing**, **ðŸ“… Tomorrow** (adds it to tomorrow's plan) and **â™¡ Save**, plus suggested follow-up questions.
-  - **ðŸ•˜ Your chats:** every conversation is kept on your phone. Open an old one to carry on, start a **ï¼‹ New chat**, or delete them.
-  - ðŸ“· reads a fridge photo, ðŸŽ¤ listens, ðŸ”Š reads answers aloud. The window shows which AI is connected.
-- **AI Chef (More â†’ AI Chef):** name a dish for its exact recipe, or leave it empty to invent one from your kitchen for a chosen meal. Dishes already in the recipe book open straight away, with no AI needed.
-- **Calories for food from outside:** on the Dashboard, **âœ¨ Estimate** asks the AI for the calories of a meal like "pizza from outside" (or type them yourself).
-- Every AI answer is checked before you see it: only real recipes are linked, and a new recipe that breaks a family rule (diet, Jain, allergies, diabetes) is never shown. Diet and allergens of AI recipes are worked out from the ingredients, not just from what the AI claims, and calories are counted by Ballava when it knows the ingredients.
+- **Ballava Chef (🧑‍🍳 Chef, in the middle of the navigation bar on a phone, at the top of the sidebar on a computer):** a short chat window that knows your kitchen, your family's needs (without their names), recent meals, the plan, your saved dishes and the whole recipe book with calories. It also knows which screen and recipe you're on.
+  - **Ask for any dish by name and you get exactly that dish.** "Chicken biryani" gives chicken biryani, never something else. If it's in the recipe book you get that recipe; if not, the AI writes it. Either way you see **what you're missing**, with **🛒 Add missing** for your shopping list. If it breaks a family rule (for example meat for a vegetarian), you still get it, with a clear warning.
+  - Every answer's dishes come with **Open recipe**, **🛒 Add missing**, **📅 Tomorrow** (adds it to tomorrow's plan) and **♡ Save**, plus suggested follow-up questions.
+  - **🕘 Your chats:** every conversation is saved. When you're signed in they're kept in your account (private to you, not shared with the family or shown to admins), so they survive signing out and follow you to your other phones and computers. Without an account they stay on that device. Open an old one to carry on (a new chat shows your recent ones), start a **＋ New chat**, or delete them.
+  - 📷 reads a fridge photo, 🎤 listens, 🔊 reads answers aloud. The window shows which AI is connected.
+- **Recipe Studio (More → Recipe Studio, or the button on the Cook screen):** name a dish for its exact recipe, or leave it empty to invent one from your kitchen for a chosen meal. Dishes already in the recipe book open straight away, with no AI needed.
+- **Calories for food from outside:** on the Dashboard, **✨ Estimate** asks the AI for the calories of a meal like "pizza from outside" (or type them yourself).
+- Every AI answer is checked before you see it: only real recipes are linked, and the AI never *suggests* a new dish that breaks a family rule (diet, Jain, allergies, diabetes). A dish you ask for by name always comes, with a clear warning if it breaks one. Diet and allergens of AI recipes are worked out from the ingredients, not just from what the AI claims, and calories are counted by Ballava when it knows the ingredients.
 
-**Without AI** (or when the free limit is used up), the AI window still answers simple questions on its own: any recipe-book dish by name with what you're missing, what to cook, tiffin ideas, the plan, calories of any dish or ingredient, protein-rich or light ideas, and fixes for common mistakes.
+**Without AI** (or when the free limit is used up), Chef still answers simple questions on its own: any recipe-book dish by name with what you're missing, what to cook, tiffin ideas, the plan, calories of any dish or ingredient, protein-rich or light ideas, and fixes for common mistakes.
 
 **The Dashboard tab** (works with or without AI):
 - **Today:** a ring showing calories against your daily goal (default 1,800 kcal per person; tap to change), plus protein, carbs and fat, and the calories of today's and tomorrow's plan.
@@ -177,13 +181,13 @@ AI can use either of two providers. You choose with one line in `.env`, and can 
 
 1. If you don't have a `.env` file yet, copy `.env.example` to a new file named `.env` in the Ballava folder.
 2. In `.env`, set `AI_PROVIDER=gemini` (or `claude`) and paste the key after the matching `..._API_KEY=`. Save.
-3. Restart the server (Docker: `docker compose up -d --force-recreate`). In the app, tap **âœ¨ AI Chef**: "Create a recipe" or "Scan my fridge".
+3. Restart the server (Docker: `docker compose up -d --force-recreate`). In the app, tap **🧑‍🍳 Chef** and ask for any recipe, or open **More → Recipe Studio**.
 
 To switch later, change `AI_PROVIDER` and restart. You can keep both keys in `.env`; only the chosen one is used. To pick a different model, set `GEMINI_MODEL` or `ANTHROPIC_MODEL`.
 
 Good to know:
 - **Free tier and privacy:** on Gemini's free tier, Google may use what Ballava sends (kitchen items, and family diet needs like allergies or diabetes) to improve its products. Before real families use your online app, switch to `claude`, or to Gemini's paid tier.
-- **Free limits:** when the day's free Gemini limit is used up, AI Chef says so and the rest of the app keeps working.
+- **Free limits:** when the day's free Gemini limit is used up, Chef says so and the rest of the app keeps working.
 - Keep keys secret: never share `.env` or put keys in the code. Keys stay on the server and browsers never see them.
 - Each family can make at most 10 AI requests per minute (`AI_RATE_LIMIT`).
 - Both AIs get the same safety rules, and their answers go through the same checks. With Claude, if the AI declines a request for safety reasons, Anthropic automatically retries it on a suitable fallback model.
@@ -198,7 +202,7 @@ Phone sign-in needs an SMS service.
 
 Any host that runs Docker or Python works, for example Render, Railway, Fly.io, or a small cloud server.
 - **Easiest:** deploy with the included `Dockerfile`.
-- **Environment variables:** `DJANGO_ALLOWED_HOSTS=yourdomain.com`, `DJANGO_CSRF_TRUSTED_ORIGINS=https://yourdomain.com` and `DJANGO_SECURE=1`. For AI Chef, add `AI_PROVIDER` and its key (`GEMINI_API_KEY` or `ANTHROPIC_API_KEY`) in the host's settings page. Don't upload `.env`.
+- **Environment variables:** `DJANGO_ALLOWED_HOSTS=yourdomain.com`, `DJANGO_CSRF_TRUSTED_ORIGINS=https://yourdomain.com` and `DJANGO_SECURE=1`. For Ballava Chef and Recipe Studio, add `AI_PROVIDER` and its key (`GEMINI_API_KEY` or `ANTHROPIC_API_KEY`) in the host's settings page. Don't upload `.env`.
 - **Keep your data:** the host must give you a **permanent disk** mounted at `/data` (Docker), or set `DATA_DIR` to one. Without it, accounts vanish on every restart.
 - Check your settings with `python manage.py check --deploy`.
 - Hosts give you an **https** address, so phone install, microphone and offline mode all work.
@@ -207,33 +211,33 @@ Any host that runs Docker or Python works, for example Render, Railway, Fly.io, 
 
 ```
 ballava/
-â”œâ”€â”€ README.md              â† this guide
-â”œâ”€â”€ manage.py              â† Django's command line (runserver, migrate, createsuperuserâ€¦)
-â”œâ”€â”€ requirements.txt       â† Python libraries the app needs
-â”œâ”€â”€ requirements-dev.txt   â† extra libraries for testing
-â”œâ”€â”€ .env.example           â† settings template (copy to .env)
-â”œâ”€â”€ Dockerfile, docker-compose.yml, .dockerignore   â† Docker set-up (optional)
-â”œâ”€â”€ config/                â† Django settings and web addresses
-â”‚   â”œâ”€â”€ settings.py
-â”‚   â””â”€â”€ urls.py            â† /admin, /api/â€¦, and the app itself
-â”œâ”€â”€ kitchen/               â† the Ballava Django app (all Python)
-â”‚   â”œâ”€â”€ data/              â† recipes, ingredients (with Hindi/Telugu/Tamil names), nutrition per 100 g, Bachao fixes
-â”‚   â”œâ”€â”€ templates/, static/ â† the admin portal's look, dashboard, recipe book and ingredient pages
-â”‚   â”œâ”€â”€ engine.py          â† understanding what people type, matching dishes, family rules
-â”‚   â”œâ”€â”€ planner.py         â† weekly plans, no repeats, goals, plates, tiffins, dashboard, built-in Ask Ballava answers
-â”‚   â”œâ”€â”€ nutrition.py       â† calories: turns "1/2 cup", "2 cloves" into grams, then kcal per serving
-â”‚   â”œâ”€â”€ assistant.py       â† what the AI assistant is told about the family, and the checks on its answers
-â”‚   â”œâ”€â”€ api.py, urls.py    â† the API the phone screens call
-â”‚   â”œâ”€â”€ models.py          â† database tables
-â”‚   â”œâ”€â”€ admin.py           â† the admin portal
-â”‚   â”œâ”€â”€ ai.py              â† AI Chef (Gemini or Claude, chosen by AI_PROVIDER)
-â”‚   â”œâ”€â”€ security.py        â† rate limits and phone codes
-â”‚   â””â”€â”€ tests/             â† pytest checks and real-browser tests
-â”œâ”€â”€ src/                   â† the phone screens (React, JavaScript)
-â”œâ”€â”€ public/                â† page skeleton, icons, offline support
-â”œâ”€â”€ dist/                  â† the built screens Django serves (made by `npm run build`)
-â”œâ”€â”€ data/                  â† the database and secret key (created when you run it; back it up)
-â””â”€â”€ legacy_js/             â† the old JavaScript server, kept for reference (safe to delete)
+├── README.md              ← this guide
+├── manage.py              ← Django's command line (runserver, migrate, createsuperuser…)
+├── requirements.txt       ← Python libraries the app needs
+├── requirements-dev.txt   ← extra libraries for testing
+├── .env.example           ← settings template (copy to .env)
+├── Dockerfile, docker-compose.yml, .dockerignore   ← Docker set-up (optional)
+├── config/                ← Django settings and web addresses
+│   ├── settings.py
+│   └── urls.py            ← /admin, /api/…, and the app itself
+├── kitchen/               ← the Ballava Django app (all Python)
+│   ├── data/              ← recipes, ingredients (with Hindi/Telugu/Tamil names), nutrition per 100 g, Bachao fixes
+│   ├── templates/, static/ ← the admin portal's look, dashboard, recipe book and ingredient pages
+│   ├── engine.py          ← understanding what people type, matching dishes, family rules
+│   ├── planner.py         ← weekly plans, no repeats, goals, plates, tiffins, dashboard, Chef's built-in answers (when AI is off)
+│   ├── nutrition.py       ← calories: turns "1/2 cup", "2 cloves" into grams, then kcal per serving
+│   ├── assistant.py       ← what Ballava Chef is told about the family, and the checks on its answers
+│   ├── api.py, urls.py    ← the API the phone screens call
+│   ├── models.py          ← database tables
+│   ├── admin.py           ← the admin portal
+│   ├── ai.py              ← Ballava Chef and Recipe Studio (Gemini or Claude, chosen by AI_PROVIDER)
+│   ├── security.py        ← rate limits and phone codes
+│   └── tests/             ← pytest checks and real-browser tests
+├── src/                   ← the phone screens (React, JavaScript)
+├── public/                ← page skeleton, icons, offline support
+├── dist/                  ← the built screens Django serves (made by `npm run build`)
+├── data/                  ← the database and secret key (created when you run it; back it up)
+└── legacy_js/             ← the old JavaScript server, kept for reference (safe to delete)
 ```
 
 ## 12. Troubleshooting
@@ -242,13 +246,13 @@ ballava/
 |---|---|
 | `python` is "not recognised" | Reinstall Python with **Add python.exe to PATH** ticked, then close and reopen PowerShell. |
 | "Error: That port is already in use" | Ballava is already running in another window. Close it, or use another port: `runserver 8001`. |
-| "No module named django" | You're not using the virtual environment. Use `.venv\Scripts\python â€¦`, or run the install step again. |
+| "No module named django" | You're not using the virtual environment. Use `.venv\Scripts\python …`, or run the install step again. |
 | "no such table" | Run `.venv\Scripts\python manage.py migrate`. |
-| The page says "Loading recipesâ€¦" forever | The server isn't running, or the phone can't reach it. Start `runserver` and refresh. |
+| The page says "Loading recipes…" forever | The server isn't running, or the phone can't reach it. Start `runserver` and refresh. |
 | Typing ingredients doesn't work offline | Reading typed words happens on the server. Offline, pick items from the list instead. |
 | Forgot the admin password | `.venv\Scripts\python manage.py changepassword you@example.com` |
-| AI Chef says "switched off" | Check `.env` has `AI_PROVIDER=gemini` with `GEMINI_API_KEY=...` (or `claude` with `ANTHROPIC_API_KEY=...`), then restart the server. |
-| AI Chef says "free AI limit is used up" | Gemini's free daily limit is reached. Wait (it resets daily), or switch to `AI_PROVIDER=claude`. |
+| Chef says "AI is off", or Recipe Studio says it needs AI | Check `.env` has `AI_PROVIDER=gemini` with `GEMINI_API_KEY=...` (or `claude` with `ANTHROPIC_API_KEY=...`), then restart the server. |
+| Chef says "free AI limit is used up" | Gemini's free daily limit is reached. Wait (it resets daily), or switch to `AI_PROVIDER=claude`. |
 | Page looks old after an update | Refresh hard: **Ctrl + Shift + R**. |
 | "no such column" after an update | Run `.venv\Scripts\python manage.py migrate` (Docker does this by itself when it starts). |
 

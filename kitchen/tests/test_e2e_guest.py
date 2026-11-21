@@ -5,7 +5,7 @@ import re
 import pytest
 from playwright.sync_api import expect
 
-from .e2e_helpers import browser, device, errors, open_ai, site, snap, tab, more  # noqa: F401  (pytest fixtures)
+from .e2e_helpers import WIDE, browser, device, errors, no_sideways_scroll, open_chef, site, snap, tab, more  # noqa: F401  (pytest fixtures)
 
 pytestmark = pytest.mark.e2e
 
@@ -123,20 +123,20 @@ def test_jain_vegetarian_member_changes_suggestions(page):
 
 
 def test_ai_chef_explains_it_is_switched_off(page):
-    page.get_by_role('button', name='✨ AI Chef').click()
-    page.get_by_text('AI Chef is switched off').wait_for()
+    page.get_by_role('button', name='✨ Recipe Studio').click()
+    page.get_by_text('Recipe Studio needs AI').wait_for()
     page.get_by_text(re.compile('AI_PROVIDER')).wait_for()
 
 
 def test_ai_is_in_the_navigation_on_every_tab(page):
     for name in ['Cook', 'Plan', 'Kitchen', 'List', 'Dashboard', 'More']:
         tab(page, name)
-        open_ai(page)
+        open_chef(page)
         page.get_by_text('AI is off · quick answers').wait_for()
-        tab(page, 'AI assistant')  # the same button closes it again
-        expect(page.get_by_role('dialog', name='Ballava AI')).to_have_count(0)
+        tab(page, 'Ballava Chef')  # the same button closes it again
+        expect(page.get_by_role('dialog', name='Ballava Chef')).to_have_count(0)
     tab(page, 'Cook')
-    open_ai(page)
+    open_chef(page)
     page.get_by_label('Your question').fill('How many calories in dal tadka?')
     page.get_by_role('button', name='Send').click()
     page.locator('.bubble.bot', has_text='kcal per serving').wait_for()
@@ -153,13 +153,14 @@ def test_every_chat_is_kept(page):
     page.get_by_role('button', name=re.compile('Your chats')).click()
     page.locator('.chat-list-item', has_text='How many calories in dal tadka?').wait_for()
     page.get_by_role('button', name='New chat').click()
-    page.get_by_text("Hi! I'm Ballava AI").wait_for()
+    page.get_by_text("I'm Ballava Chef").wait_for()
+    page.locator('.recent-chat', has_text='How many calories').wait_for()  # recent chats, right there in a new chat
     page.get_by_role('button', name=re.compile('Your chats')).click()
     page.locator('.chat-list-open', has_text='How many calories').click()
     page.locator('.bubble.me', has_text='How do I make chole?').wait_for()
     page.locator('.chat-dish', has_text='Dal Tadka').get_by_role('button', name='Open recipe').click()
     page.get_by_role('heading', name=re.compile('Dal Tadka')).wait_for()
-    expect(page.get_by_role('dialog', name='Ballava AI')).to_have_count(0), 'opening a dish closes the chat'
+    expect(page.get_by_role('dialog', name='Ballava Chef')).to_have_count(0), 'opening a dish closes the chat'
 
 
 def test_recipe_shows_calories_and_can_be_saved(page):
@@ -182,6 +183,26 @@ def test_recipe_shows_calories_and_can_be_saved(page):
     page.get_by_text('Nothing saved yet').wait_for()
 
 
+def test_dashboard_greets_you_by_name(page):
+    tab(page, 'Dashboard')
+    page.get_by_role('heading', name=re.compile('^Good (morning|afternoon|evening)|^Hello')).wait_for()
+    page.get_by_role('button', name='What should I call you?').click()
+    page.get_by_label('Your name').fill('Deepak')
+    page.get_by_role('button', name='Save', exact=True).click()
+    page.get_by_role('heading', name=re.compile(', Deepak')).wait_for()
+    page.locator('.quick-card').get_by_role('button', name=re.compile('What can I cook')).wait_for()
+    open_chef(page)
+    page.get_by_role('button', name='New chat').click()
+    page.get_by_text("Hi Deepak! I'm Ballava Chef").wait_for()
+    tab(page, 'Ballava Chef')
+
+
+def test_the_app_opens_on_the_dashboard(page):
+    page.goto(page.url.split('#')[0])
+    page.get_by_role('heading', name=re.compile(', Deepak')).wait_for()
+    expect(page.get_by_role('navigation', name='Main').get_by_role('button', name='Dashboard', exact=True)).to_have_class(re.compile('active'))
+
+
 def test_dashboard_shows_calories_and_meals(page):
     tab(page, 'Dashboard')
     page.locator('.goal-ring').wait_for()
@@ -202,6 +223,38 @@ def test_calories_and_the_light_filter(page):
     for text in page.locator('.dish-card .kcal').all_inner_texts():
         assert int(text.split()[0]) <= 400, text
     page.get_by_role('button', name='Light (≤400 kcal)').click()
+
+
+def test_computer_screens_use_the_width(device, site):
+    p = device(WIDE)
+    p.goto(site)
+    p.locator('.login-perks').wait_for()  # sign-in: the story on the left, the forms on the right
+    snap(p, '40-desktop-login')
+    p.get_by_role('button', name='Continue without an account').click()
+    p.get_by_role('button', name='Try with a sample kitchen').click()
+    p.get_by_text('Cook now').wait_for()
+    nav = p.get_by_role('navigation', name='Main').bounding_box()
+    assert nav['x'] == 0 and nav['height'] > 800 and nav['width'] < 300, f'a sidebar on the left: {nav}'
+    p.locator('.dish-card').nth(3).wait_for()
+    columns = p.evaluate("getComputedStyle(document.querySelector('.dish-list')).gridTemplateColumns.split(' ').length")
+    assert columns >= 2, columns
+    snap(p, '41-desktop-cook')
+    tab(p, 'Dashboard')
+    p.locator('.hub-grid .quick-card').wait_for()
+    snap(p, '42-desktop-dashboard')
+    no_sideways_scroll(p, 'desktop dashboard')
+    p.goto(site + '#/recipe/dal_tadka')
+    left, right = p.locator('.recipe-left').bounding_box(), p.locator('.recipe-right').bounding_box()
+    assert right['x'] > left['x'] + left['width'] - 1, 'ingredients and steps sit beside the details'
+    tab(p, 'Ballava Chef')
+    p.get_by_role('dialog', name='Ballava Chef').wait_for()
+    panel = p.locator('.sheet-inner.assistant').bounding_box()
+    assert panel['x'] + panel['width'] >= 1439 and panel['height'] >= 890, f'Chef is docked on the right: {panel}'
+    main = p.locator('main').bounding_box()
+    assert main['x'] + main['width'] <= panel['x'] + 1, 'the page makes room for Chef instead of hiding under it'
+    snap(p, '43-desktop-recipe-chef')
+    no_sideways_scroll(p, 'desktop recipe with Chef')
+    p.context.close()
 
 
 def test_data_survives_a_reload(page):

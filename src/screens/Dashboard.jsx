@@ -2,11 +2,89 @@
 // Python works the numbers out (kitchen/planner.py -> calorie_dashboard). Calories are one serving of each logged
 // meal, so they're a rough guide per person, not a medical report.
 import React, { useState } from 'react';
-import { WEEKDAYS, SLOTS, SLOT_LABEL, dayKey } from '../catalog.js';
-import { Header, Thinking } from '../ui.jsx';
+import { WEEKDAYS, SLOTS, SLOT_LABEL, dayKey, daysLeft, useSoon } from '../catalog.js';
+import { Thinking, ingName, expiryLabel } from '../ui.jsx';
 import { api, go, useBrain, whatsappLink } from '../lib.js';
 import { t } from '../i18n.js';
+import { firstName } from '../Assistant.jsx';
 import Track from './Track.jsx';
+import { TodayCard, DEMO } from './Home.jsx';
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const LONG_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function greeting(hour) {
+  if (hour < 5) return ['Hello', "Up early? Here's your kitchen."];
+  if (hour < 12) return ['Good morning', "Breakfast time. Here's your day in the kitchen."];
+  if (hour < 17) return ['Good afternoon', "Lunch done? Here's how the day looks."];
+  return ['Good evening', "Dinner plans? Here's your kitchen tonight."];
+}
+
+// Greeting by name, today's menu, shortcuts and what to use up: the first thing you see.
+function Welcome({ auth, prefs, setPrefs, pantry, shopping, savedDishes, plan, findRecipe, log, logMeal, notify, openAssistant, addToPantry, catalog }) {
+  const now = new Date();
+  const [hi, line] = greeting(now.getHours());
+  const name = firstName(auth, prefs);
+  const [asking, setAsking] = useState(false);
+  const soon = useSoon(pantry);
+  const toBuy = shopping.filter(s => !s.done).length;
+  return (
+    <>
+      <header className="dash-hello">
+        <div>
+          <p className="dash-date">{LONG_DAYS[now.getDay()]}, {now.getDate()} {MONTHS[now.getMonth()]}</p>
+          <h1>{hi}{name ? `, ${name}` : ''} <span aria-hidden="true">👋</span></h1>
+          <p className="muted">{line}</p>
+          {!auth.user && !name && (asking ? (
+            <form className="row nowrap name-form" onSubmit={e => { e.preventDefault(); const v = String(new FormData(e.target).get('name') || '').trim().slice(0, 30); if (v) setPrefs(p => ({ ...p, name: v })); setAsking(false); }}>
+              <input name="name" aria-label="Your name" placeholder="Your name" autoFocus />
+              <button className="btn sm primary" type="submit">Save</button>
+            </form>
+          ) : <button className="btn link sm" onClick={() => setAsking(true)}>What should I call you?</button>)}
+        </div>
+        <button className="btn primary chef-cta" onClick={openAssistant}><span aria-hidden="true">🧑‍🍳</span> Ask Chef</button>
+      </header>
+
+      {catalog.announcements.map(a => <div key={a.id} className="note info">📣 {a.text}</div>)}
+
+      {pantry.length === 0 ? (
+        <section className="card welcome-card">
+          <h2 className="hero-brand small-brand">Ballava</h2>
+          <p className="hero-tag">Cooks with you today. For you tomorrow.</p>
+          <p>Tell me what's in your kitchen and I'll tell you what to cook, keep everyone's diet in mind, and count the calories for you.</p>
+          <div className="row">
+            <button className="btn primary" onClick={() => go('pantry')}>Add what I have</button>
+            <button className="btn ghost" onClick={() => { addToPantry(DEMO); notify('Loaded a sample Indian kitchen. Here is what you can cook.'); go('home'); }}>Try with a sample kitchen</button>
+          </div>
+        </section>
+      ) : (
+        <div className="hub-grid">
+          <TodayCard plan={plan} findRecipe={findRecipe} log={log} logMeal={logMeal} notify={notify} />
+          <section className="card quick-card" aria-label="Shortcuts">
+            <h3>Shortcuts</h3>
+            <div className="quick-grid">
+              <button onClick={() => go('home')}><span aria-hidden="true">🍳</span><b>What can I cook?</b><small>{pantry.length} items in your kitchen</small></button>
+              <button onClick={() => go('plan')}><span aria-hidden="true">🗓️</span><b>Plan my week</b><small>No repeats, family-friendly</small></button>
+              <button onClick={openAssistant}><span aria-hidden="true">🧑‍🍳</span><b>Ask Chef</b><small>Any recipe, calories, swaps</small></button>
+              <button onClick={() => go('list')}><span aria-hidden="true">🛒</span><b>Shopping list</b><small>{toBuy ? `${toBuy} to buy` : 'All done'}</small></button>
+              <button onClick={() => go('saved')}><span aria-hidden="true">❤️</span><b>Saved dishes</b><small>{savedDishes.length} saved</small></button>
+              <button onClick={() => go('ai')}><span aria-hidden="true">✨</span><b>Recipe Studio</b><small>Get or invent a recipe</small></button>
+            </div>
+          </section>
+          {soon.length > 0 && (
+            <section className="card soon-card">
+              <h3>⏳ Use these soon</h3>
+              {soon.slice(0, 5).map(p => (
+                <div key={p.id} className="row between"><span>{ingName(p.id)}</span><span className={'p-exp ' + expiryLabel(daysLeft(p)).cls}>{expiryLabel(daysLeft(p)).text}</span></div>
+              ))}
+              <button className="btn link sm" onClick={() => go('home')}>Dishes that use them up →</button>
+            </section>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
 
 const DEFAULT_GOAL = 1800;
 const PERIODS = [[7, '7 days'], [14, '14 days'], [30, '30 days']];
@@ -70,7 +148,7 @@ function Overview({ history, setHistory, aiRecipes, plan, members, prefs, setPre
     `Today: ${fmt(d.today.kcal)} of ${fmt(goal)} kcal`, ...d.dishes.slice(0, 3).map(x => `- ${x.name}: ${x.times}x, ${fmt(x.kcal)} kcal a serving`)].join('\n');
 
   return (
-    <>
+    <div className="ov">
       <Thinking state={brain} />
       <section className="card today-kcal">
         <GoalRing kcal={d.today.kcal} goal={goal} />
@@ -89,6 +167,7 @@ function Overview({ history, setHistory, aiRecipes, plan, members, prefs, setPre
         </div>
       </section>
 
+      <div className="dash-side">
       <div className="chips" role="group" aria-label="Period">
         {PERIODS.map(([n, label]) => <button key={n} className={'chip' + (days === n ? ' on' : '')} aria-pressed={days === n} onClick={() => setDays(n)}>{label}</button>)}
       </div>
@@ -101,8 +180,9 @@ function Overview({ history, setHistory, aiRecipes, plan, members, prefs, setPre
         <div><span aria-hidden="true">❤️</span><b>{savedDishes.length}</b><small>saved dishes</small></div>
         <div><span aria-hidden="true">🧺</span><b>{pantry.length}</b><small>in your kitchen</small></div>
       </div>
+      </div>
 
-      <section className="card">
+      <section className="card span-2">
         <div className="row between"><h3>🔥 Calories per day</h3><span className="muted small">goal line {fmt(goal)}</span></div>
         <div className={'kcal-bars' + (days > 14 ? ' many' : '')} style={{ '--cols': d.days.length }} role="img"
           aria-label={`Calories per day: ${d.days.map(x => `${x.date.slice(5)} ${x.kcal}`).join(', ')}`}>
@@ -117,7 +197,7 @@ function Overview({ history, setHistory, aiRecipes, plan, members, prefs, setPre
       </section>
 
       {d.daysLogged > 0 && (
-        <div className="dash-grid">
+        <>
           <section className="card">
             <h3>🥗 Where calories come from</h3>
             <div className="macro-wrap">
@@ -141,7 +221,7 @@ function Overview({ history, setHistory, aiRecipes, plan, members, prefs, setPre
             ))}
             <p className="muted small">kcal for one serving, on average.</p>
           </section>
-        </div>
+        </>
       )}
 
       {d.swap && (
@@ -152,7 +232,7 @@ function Overview({ history, setHistory, aiRecipes, plan, members, prefs, setPre
         </section>
       )}
 
-      <section className="card">
+      <section className="card span-2">
         <div className="row between"><h3>🍛 Meals and calories</h3><span className="muted small">{d.uncounted ? `${d.uncounted} without calories` : 'per serving'}</span></div>
         {d.meals.length === 0 ? <p className="muted">Nothing logged in this period. Log meals in the Food diary, or finish cooking a recipe.</p> : (
           <div className="table-wrap">
@@ -187,9 +267,11 @@ function Overview({ history, setHistory, aiRecipes, plan, members, prefs, setPre
         </section>
       )}
 
-      <a className="btn whatsapp" href={whatsappLink(report)} target="_blank" rel="noreferrer">Share this summary on WhatsApp</a>
-      <p className="muted small center">Calories are one serving of each logged meal, from Ballava's recipe numbers. A rough guide per person, not medical advice.</p>
-    </>
+      <div className="span-2 share-row">
+        <a className="btn whatsapp" href={whatsappLink(report)} target="_blank" rel="noreferrer">Share this summary on WhatsApp</a>
+        <p className="muted small center">Calories are one serving of each logged meal, from Ballava's recipe numbers. A rough guide per person, not medical advice.</p>
+      </div>
+    </div>
   );
 }
 
@@ -197,7 +279,8 @@ export default function Dashboard(props) {
   const { view } = props;
   return (
     <div className="screen dashboard">
-      <Header title="Dashboard" />
+      {view === 'overview' && <Welcome {...props} />}
+      {view === 'diary' && <header className="dash-hello"><div><p className="dash-date">Dashboard</p><h1>Food diary</h1></div></header>}
       <div className="segments" role="group" aria-label="Dashboard view">
         <button className={'seg' + (view === 'overview' ? ' on' : '')} aria-pressed={view === 'overview'} onClick={() => go('dashboard')}>📊 Overview</button>
         <button className={'seg' + (view === 'diary' ? ' on' : '')} aria-pressed={view === 'diary'} onClick={() => go('track')}>📖 Food diary</button>

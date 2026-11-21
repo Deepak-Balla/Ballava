@@ -174,3 +174,61 @@ def test_family_vote(make_user):
     assert [o['votes'] for o in changed['options']] == [1, 1] and changed['total'] == 2
     assert 'household' not in str(changed)
     assert guest.get_json('polls/nope')[0] == 404
+
+
+# ---------------------------------------------------------------- Ballava Chef: saved chats
+def chat(id_='chat0001', at=1000, **over):
+    return {'id': id_, 'title': 'Chicken biryani?', 'at': at, 'messages': [
+        {'from': 'bot', 'text': 'Hi! I am Ballava Chef.'},
+        {'from': 'me', 'text': 'Give me chicken biryani', 'at': at},
+        {'from': 'bot', 'text': 'Here it is.', 'recipeId': 'ai_x1', 'dishes': ['chole'], 'followups': ['Veg version?'], 'warning': 'Amma is veg',
+         'secret': 'dropped', 'at': at}], **over}
+
+
+def test_chats_are_saved_in_your_account(make_user):
+    c = make_user()
+    assert c.post_json('chats', chat())[0] == 200
+    assert c.post_json('chats', chat('chat0002', at=2000, title='Tiffin ideas'))[0] == 200
+    status, body = c.get_json('chats')
+    assert status == 200 and [x['id'] for x in body['chats']] == ['chat0002', 'chat0001'], 'newest first'
+    saved = body['chats'][1]['messages'][2]
+    assert saved['recipeId'] == 'ai_x1' and saved['followups'] == ['Veg version?'] and 'secret' not in saved, 'only known fields are kept'
+    c.post_json('chats', chat(at=3000, title='Chicken biryani, again'))  # the same chat, updated
+    assert c.get_json('chats')[1]['chats'][0]['title'] == 'Chicken biryani, again'
+
+
+def test_chats_survive_signing_out_and_stay_private(make_user):
+    c = make_user()
+    c.post_json('chats', chat())
+    c.post_json('auth/logout', {})
+    assert Api().get_json('chats')[0] == 401, 'guests keep chats on their phone only'
+    again = Api()
+    again.post_json('auth/login', {'email': c.email, 'password': 'kadai-masala-42'})
+    assert [x['id'] for x in again.get_json('chats')[1]['chats']] == ['chat0001'], 'back after signing in again'
+    other = make_user()
+    assert other.get_json('chats')[1]['chats'] == [], "nobody else sees them, not even family"
+
+
+def test_chat_limits_and_deleting(make_user):
+    c = make_user()
+    assert c.post_json('chats', chat('bad id!'))[0] == 400
+    long = chat(messages=[{'from': 'me', 'text': 'x' * 4500}] * 150)
+    assert c.post_json('chats', long)[0] == 200
+    kept = c.get_json('chats')[1]['chats'][0]['messages']
+    assert len(kept) == 100 and len(kept[0]['text']) == 4000
+    for n in range(52):
+        c.post_json('chats', chat(f'many{n:04d}', at=10_000 + n))
+    assert len(c.get_json('chats')[1]['chats']) == 50, 'the newest 50 are kept'
+    c.post_json('chats/delete', {'id': 'many0051'})
+    assert 'many0051' not in [x['id'] for x in c.get_json('chats')[1]['chats']]
+    c.post_json('chats/delete', {'all': True})
+    assert c.get_json('chats')[1]['chats'] == []
+
+
+def test_chats_are_in_your_download_and_go_with_your_account(make_user):
+    from kitchen.models import ChatThread
+    c = make_user()
+    c.post_json('chats', chat())
+    assert c.get_json('account/export')[1]['chats'][0]['title'] == 'Chicken biryani?'
+    c.post_json('account/delete', {'confirm': 'DELETE'})
+    assert ChatThread.objects.count() == 0

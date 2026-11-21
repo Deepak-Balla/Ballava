@@ -75,7 +75,7 @@ function SavedRow({ savedDishes, findRecipe, log, isSaved, toggleSave }) {
   );
 }
 
-function TodayCard({ plan, findRecipe, log, logMeal, notify }) {
+export function TodayCard({ plan, findRecipe, log, logMeal, notify }) {
   const today = dayKey();
   const day = plan[today];
   const slots = SLOTS.filter(s => day?.[s] && findRecipe(day[s]));
@@ -154,7 +154,7 @@ export default function Home({ pantry, addToPantry, members, filters, setFilters
         </div>
         <div className="home-actions">
           <button className="btn ghost sm" onClick={() => go('saved')} aria-label={`Saved dishes (${savedDishes.length})`}>♥ {savedDishes.length || 'Saved'}</button>
-          <button className="btn ghost sm" onClick={() => go('ai')}>✨ AI Chef</button>
+          <button className="btn ghost sm" onClick={() => go('ai')}>✨ Recipe Studio</button>
         </div>
       </header>
       <button className="ask-bar" onClick={openAssistant}>
@@ -226,7 +226,7 @@ export default function Home({ pantry, addToPantry, members, filters, setFilters
           </div>
         </>
       )}
-      {!aiStatus.ai && aiStatus.checked && <p className="muted small center">Want brand-new dishes and fridge-photo scanning? See ✨ AI Chef.</p>}
+      {!aiStatus.ai && aiStatus.checked && <p className="muted small center">Want brand-new dishes and fridge-photo scanning? See ✨ Recipe Studio.</p>}
     </div>
   );
 }

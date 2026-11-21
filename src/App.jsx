@@ -185,32 +185,33 @@ export default function App() {
     default: body = <Home {...ctx} />; // also #/ask, the old chat address: Home with the AI window open
   }
 
-  // ✨ AI sits in the middle of the bar, so it's one tap away on every screen.
+  // The Dashboard comes first; 🧑‍🍳 Chef sits in the middle of the bar, one tap away on every screen.
+  // On a computer the same bar becomes a sidebar on the left (see the end of styles.css).
   const tabs = [
-    ['home', 'Cook', '🍳'], ['plan', 'Plan', '🗓️'], ['pantry', 'Kitchen', '🧺'], ['ai-chat', 'AI', '✨'], ['list', 'List', '🛒'],
-    ['dashboard', 'Dashboard', '📊'], ['more', 'More', '☰'],
+    ['dashboard', 'Dashboard', '📊'], ['home', 'Cook', '🍳'], ['plan', 'Plan', '🗓️'], ['chef', 'Chef', '🧑‍🍳'], ['pantry', 'Kitchen', '🧺'],
+    ['list', 'List', '🛒'], ['more', 'More', '☰'],
   ];
   const moreScreens = ['more', 'family', 'bachao', 'account', 'saved'];
-  const active = id => (id === 'ai-chat' ? chatOpen
-    : id === 'more' ? moreScreens.includes(screen)
-      : id === 'dashboard' ? ['dashboard', 'track'].includes(screen)
-        : screen === id || (id === 'home' && !['plan', 'track', 'dashboard', 'pantry', 'list', ...moreScreens].includes(screen)));
+  const active = id => (id === 'more' ? moreScreens.includes(screen)
+    : id === 'dashboard' ? ['dashboard', 'track'].includes(screen)
+      : screen === id || (id === 'home' && !['plan', 'track', 'dashboard', 'pantry', 'list', ...moreScreens].includes(screen)));
   const hideNav = screen === 'cook';
   const listCount = shopping.filter(s => !s.done).length;
 
   return (
-    <div className={'app' + (hideNav ? ' no-nav' : '')}>
+    <div className={'app' + (hideNav ? ' no-nav' : '') + (chatOpen ? ' chat-open' : '')}>
       <main>{body}</main>
       {hideNav && !chatOpen && <AssistantButton onOpen={() => setChatOpen(true)} />}
       {chatOpen && <Assistant screen={screen} param={param} onClose={() => setChatOpen(false)} ctx={ctx} />}
       {toast && <div className="toast" role="status">{toast}</div>}
       {!hideNav && (
         <nav className="tabbar" aria-label="Main">
-          {tabs.map(([id, label, icon]) => (id === 'ai-chat' ? (
+          <a className="nav-brand" href="#/dashboard" aria-label="Ballava, go to the dashboard"><span className="brand-mark" aria-hidden="true">B</span><span>Ballava</span></a>
+          {tabs.map(([id, label, icon]) => (id === 'chef' ? (
             <button key={id} className={'ai-tab' + (chatOpen ? ' active' : '')} onClick={() => setChatOpen(o => !o)}
-              aria-label="AI assistant" aria-expanded={chatOpen}>
-              <span className="ai-orb" aria-hidden="true">✨</span>
-              <span>AI</span>
+              aria-label="Ballava Chef" aria-expanded={chatOpen}>
+              <span className="ai-orb" aria-hidden="true">{icon}</span>
+              <span>{label}</span>
             </button>
           ) : (
             <button key={id} className={active(id) && !chatOpen ? 'active' : ''} onClick={() => { setChatOpen(false); go(id); }} aria-label={t(label)}>

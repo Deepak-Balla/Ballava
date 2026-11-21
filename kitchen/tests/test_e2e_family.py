@@ -7,7 +7,7 @@ import pytest
 from django.contrib.auth.models import User
 from playwright.sync_api import expect
 
-from .e2e_helpers import DESKTOP, browser, device, diary, errors, more, no_sideways_scroll, open_ai, site, snap, tab  # noqa: F401
+from .e2e_helpers import DESKTOP, browser, device, diary, errors, more, no_sideways_scroll, open_chef, site, snap, tab  # noqa: F401
 
 pytestmark = pytest.mark.e2e
 
@@ -208,7 +208,7 @@ def test_finishing_a_cook_logs_it_and_keeps_leftovers(page, site):
 
 def test_ai_window_knows_the_plan(page):
     tab(page, 'Plan')
-    open_ai(page)
+    open_chef(page)
     page.get_by_role('button', name="What's planned for tomorrow?").click()
     page.locator('.bubble.bot', has_text="Tomorrow's plan").wait_for()
     page.get_by_label('Your question').fill('I have paneer and spinach')
@@ -217,18 +217,24 @@ def test_ai_window_knows_the_plan(page):
     card.wait_for()
     card.get_by_role('button', name='📅 Tomorrow').click()
     page.get_by_text(re.compile("Planned Palak Paneer for tomorrow's")).wait_for()
-    snap(page, '25-ai-window')
-    no_sideways_scroll(page, 'AI window')
-    tab(page, 'AI assistant')
-    page.goto(page.url.split('#')[0] + '#/ask')  # the old Ask Ballava address opens the AI window
-    page.get_by_role('dialog', name='Ballava AI').wait_for()
-    tab(page, 'AI assistant')
+    snap(page, '25-chef-window')
+    no_sideways_scroll(page, 'Chef window')
+    tab(page, 'Ballava Chef')
+    page.goto(page.url.split('#')[0] + '#/ask')  # the old Ask Ballava address opens Chef
+    page.get_by_role('dialog', name='Ballava Chef').wait_for()
+    tab(page, 'Ballava Chef')
 
 
 def test_data_follows_you_to_a_second_phone(page, device, site):
     phone2 = device()
     page.wait_for_timeout(1500)  # let the last changes upload
     sign_in(phone2, site)
+    phone2.get_by_role('heading', name=re.compile(', Asha')).wait_for()  # the dashboard greets her by name
+    open_chef(phone2)  # her chats came along to the new phone
+    phone2.get_by_role('button', name=re.compile('Your chats')).click()
+    phone2.locator('.chat-list-item', has_text="What's planned for tomorrow?").wait_for()
+    phone2.get_by_text('Saved in your account').wait_for()
+    tab(phone2, 'Ballava Chef')
     tab(phone2, 'Plan')
     phone2.locator('.plan-day').first.wait_for()
     diary(phone2)

@@ -68,15 +68,22 @@ export default function Login({ onDone, onGuest, server }) {
   );
 
   return (
-    <div className="app no-nav">
-      <main className="screen">
+    <div className="app no-nav login-page">
+      <main className="screen login-layout">
         <section className="hero">
           <div className="hero-brand">Ballava</div>
           <p className="hero-tag">Cooks with you today. For you tomorrow.</p>
           <p>Stop wondering what to cook. Ballava plans your family's meals, remembers what you made, and keeps everyone's diet in mind.</p>
+          <ul className="login-perks">
+            <li>🧑‍🍳 Ballava Chef: any recipe by name, with what you're missing</li>
+            <li>📊 A dashboard with every meal's calories</li>
+            <li>🗓️ A week of meals with no repeats, in one tap</li>
+            <li>👪 Every family member's diet, allergies and goals</li>
+          </ul>
         </section>
 
-        {!server && <div className="note warn">You seem to be offline. You can still use Ballava on this device.</div>}
+        <div className="login-panel">
+        {!server &&<div className="note warn">You seem to be offline. You can still use Ballava on this device.</div>}
 
         <div className="segments login-tabs" role="group" aria-label="Who is signing in">
           {tab('signin', 'Sign in')}{tab('signup', 'Create account')}{tab('admin', 'Admin')}
@@ -115,6 +122,7 @@ export default function Login({ onDone, onGuest, server }) {
 
         <button className="btn link center-btn" onClick={onGuest}>Continue without an account</button>
         <p className="muted small center">Without an account, your data stays on this device only and can't be shared with family.</p>
+        </div>
       </main>
     </div>
   );

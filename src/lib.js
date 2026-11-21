@@ -16,7 +16,7 @@ export function useStored(key, initial) {
 }
 
 export function useHashRoute() {
-  const read = () => (location.hash.replace(/^#\/?/, '') || 'home').split('/');
+  const read = () => (location.hash.replace(/^#\/?/, '') || 'dashboard').split('/'); // the Dashboard is the first screen
   const [route, setRoute] = useState(read);
   useEffect(() => {
     const on = () => { setRoute(read()); window.scrollTo(0, 0); };

@@ -92,10 +92,13 @@ def diary(page):
     page.get_by_role('button', name='📖 Food diary').click()
 
 
-def open_ai(page):
-    """The ✨ AI button in the middle of the navigation bar."""
-    tab(page, 'AI assistant')
-    page.get_by_role('dialog', name='Ballava AI').wait_for()
+def open_chef(page):
+    """The 🧑‍🍳 Chef button in the middle of the navigation bar (the sidebar on a computer)."""
+    tab(page, 'Ballava Chef')
+    page.get_by_role('dialog', name='Ballava Chef').wait_for()
+
+
+WIDE = {'viewport': {'width': 1440, 'height': 900}}
 
 
 def no_sideways_scroll(page, where):

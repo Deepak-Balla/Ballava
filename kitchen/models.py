@@ -49,6 +49,21 @@ class FamilyData(models.Model):
         constraints = [models.UniqueConstraint(fields=['household', 'key'], name='one_value_per_key')]
 
 
+class ChatThread(models.Model):
+    """One conversation with Ballava Chef. Private to the person who had it: not shared with the family,
+    and not shown in the admin portal. Deleted with their account."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='chats')
+    chat_id = models.CharField(max_length=40)
+    title = models.CharField(max_length=80, blank=True)
+    at = models.BigIntegerField(default=0, help_text='Last message time, in milliseconds (as the phone counts it).')
+    messages = models.JSONField(default=list)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'chat_id'], name='one_row_per_chat')]
+        ordering = ['-at']
+
+
 class PhoneCode(models.Model):
     phone = models.CharField(max_length=20, primary_key=True)
     code_hash = models.CharField(max_length=64)

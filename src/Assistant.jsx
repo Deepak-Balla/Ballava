@@ -1,62 +1,110 @@
-// Ballava AI: the chat window that opens from the ✨ AI button in the navigation, on every screen.
+// Ballava Chef: the chat window that opens from the 🧑‍🍳 Chef button in the navigation, on every screen.
 // Python answers (kitchen/api.py -> ai_chat): with AI switched on it's the real AI (Gemini or Claude), which knows this
 // family's kitchen, needs, diary, plan and recipe book; otherwise the built-in brain answers.
-// Every conversation is kept on this phone (they can be personal), so you can go back to any of them.
-import React, { useEffect, useRef, useState } from 'react';
+// Every conversation is kept: on this phone, and when you're signed in also in your account (kitchen/api.py -> chats),
+// private to you, so your chats survive signing out and follow you to your other devices.
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, go, listenOnce, SpeechRec, speak, stopSpeaking, shrinkImage } from './lib.js';
 import { ingName, missingFor, lineName, slotFor, dayKey, addDays, SLOT_LABEL } from './catalog.js';
 
-const HELLO = { from: 'bot', text: "Hi! I'm Ballava AI. Ask me for any recipe by name, what to cook with what you have, calories, swaps, tiffin ideas, or how to fix a dish." };
+const hello = name => ({ from: 'bot', text: `Hi${name ? ' ' + name : ''}! I'm Ballava Chef 🧑‍🍳 Ask me for any recipe by name, what to cook with what you have, calories, swaps, tiffin ideas, or how to fix a dish.` });
 const KEY = 'ballava.chats';
-const MAX_CHATS = 30;
-const MAX_MESSAGES = 80;
-const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-const titleOf = messages => (messages.find(m => m.from === 'me')?.text || 'New chat').slice(0, 48);
+const MAX_CHATS = 50;
+const MAX_MESSAGES = 100;
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const titleOf = messages => (messages.find(m => m.from === 'me')?.text || 'New chat').slice(0, 60);
+const byNewest = (a, b) => (b.at || 0) - (a.at || 0);
 
-// ---- All chats, saved on this device: { list: [{ id, title, at, messages }], current }
+// ---- All chats: { list: [{ id, title, at, messages }], current }
 function loadChats() {
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
     if (saved?.list) return saved;
   } catch { /* nothing saved */ }
-  let old = null; // the single chat kept by the earlier version
+  let old = null; // the single chat kept by an earlier version
   try { old = JSON.parse(localStorage.getItem('ballava.chat') || 'null'); } catch { /* none */ }
   const list = Array.isArray(old) && old.some(m => m.from === 'me') ? [{ id: newId(), title: titleOf(old), at: Date.now(), messages: old }] : [];
   return { list, current: list[0]?.id || null };
 }
 
-function useChats() {
+function useChats(signedIn, name) {
   const [store, setStore] = useState(loadChats);
+  const latest = useRef(store);
+  latest.current = store;
+  const pending = useRef(new Set()); // chats changed here that the server hasn't got yet
+  const timer = useRef(null);
+  const [synced, setSynced] = useState(false);
+
   useEffect(() => {
     try { localStorage.setItem(KEY, JSON.stringify(store)); localStorage.removeItem('ballava.chat'); } catch { /* storage full */ }
   }, [store]);
+
+  const flush = useCallback(async () => {
+    if (!signedIn) { pending.current.clear(); return; }
+    for (const id of [...pending.current]) {
+      const c = latest.current.list.find(x => x.id === id);
+      pending.current.delete(id);
+      if (!c) continue;
+      try { await api('chats', { id: c.id, title: c.title, at: c.at, messages: c.messages }); } catch { pending.current.add(id); return; }
+    }
+  }, [signedIn]);
+  const queue = id => { pending.current.add(id); clearTimeout(timer.current); timer.current = setTimeout(flush, 700); };
+
+  // Signed in: bring in the chats saved in your account, and send up any that only this phone has.
+  useEffect(() => {
+    if (!signedIn) return undefined;
+    let live = true;
+    api('chats').then(({ chats }) => {
+      if (!live) return;
+      const server = new Map(chats.map(c => [c.id, c]));
+      for (const c of latest.current.list) if (!server.has(c.id) || (c.at || 0) > (server.get(c.id).at || 0)) pending.current.add(c.id);
+      setStore(s => {
+        const merged = new Map(s.list.map(c => [c.id, c]));
+        for (const c of chats) if (!merged.has(c.id) || (c.at || 0) > (merged.get(c.id).at || 0)) merged.set(c.id, c);
+        return { ...s, list: [...merged.values()].sort(byNewest).slice(0, MAX_CHATS) };
+      });
+      setSynced(true);
+      setTimeout(flush, 0);
+    }).catch(() => {});
+    return () => { live = false; clearTimeout(timer.current); flush(); };
+  }, [signedIn, flush]);
+
   const chat = store.list.find(c => c.id === store.current) || null;
   return {
     list: store.list,
     chat,
-    messages: chat ? chat.messages : [HELLO],
+    synced,
+    messages: chat ? chat.messages : [hello(name)],
     add(msg) {
+      const s0 = latest.current;
+      const id = s0.list.some(c => c.id === s0.current) ? s0.current : newId();
       setStore(s => {
-        let { list, current } = s;
-        if (!list.some(c => c.id === current)) {
-          current = newId();
-          list = [{ id: current, title: 'New chat', at: Date.now(), messages: [HELLO] }, ...list].slice(0, MAX_CHATS);
-        }
+        let list = s.list;
+        if (!list.some(c => c.id === id)) list = [{ id, title: 'New chat', at: Date.now(), messages: [hello(name)] }, ...list].slice(0, MAX_CHATS);
         list = list.map(c => {
-          if (c.id !== current) return c;
+          if (c.id !== id) return c;
           const messages = [...c.messages, msg].slice(-MAX_MESSAGES);
           return { ...c, messages, at: Date.now(), title: titleOf(messages) };
         });
-        return { current, list: [list.find(c => c.id === current), ...list.filter(c => c.id !== current)] };
+        return { current: id, list: [list.find(c => c.id === id), ...list.filter(c => c.id !== id)] };
       });
+      queue(id);
     },
     update(index, change) {
+      const id = latest.current.current;
       setStore(s => ({ ...s, list: s.list.map(c => (c.id === s.current ? { ...c, messages: c.messages.map((m, i) => (i === index ? { ...m, ...change } : m)) } : c)) }));
+      if (id) queue(id);
     },
     open: id => setStore(s => ({ ...s, current: id })),
     startNew: () => setStore(s => ({ ...s, current: null })),
-    remove: id => setStore(s => ({ list: s.list.filter(c => c.id !== id), current: s.current === id ? null : s.current })),
-    clearAll: () => setStore({ list: [], current: null }),
+    remove: id => {
+      setStore(s => ({ list: s.list.filter(c => c.id !== id), current: s.current === id ? null : s.current }));
+      if (signedIn) api('chats/delete', { id }).catch(() => {});
+    },
+    clearAll: () => {
+      setStore({ list: [], current: null });
+      if (signedIn) api('chats/delete', { all: true }).catch(() => {});
+    },
   };
 }
 
@@ -138,9 +186,12 @@ function BotExtras({ m, i, ctx, close, update }) {
   );
 }
 
+export const firstName = (auth, prefs) => ((auth?.user?.name || prefs?.name || '').trim().split(/\s+/)[0] || '');
+
 export default function Assistant({ screen, param, onClose, ctx }) {
-  const { family, plan, savedDishes, findRecipe, setAiRecipes, aiStatus } = ctx;
-  const chats = useChats();
+  const { family, plan, savedDishes, findRecipe, setAiRecipes, aiStatus, auth, prefs } = ctx;
+  const signedIn = !!auth?.user;
+  const chats = useChats(signedIn, firstName(auth, prefs));
   const { messages } = chats;
   const [text, setText] = useState('');
   const [busy, setBusy] = useState('');
@@ -198,22 +249,22 @@ export default function Assistant({ screen, param, onClose, ctx }) {
   const chips = last?.from === 'bot' && last.followups?.length && !busy ? last.followups : starters(screen, recipe, ai);
 
   return (
-    <div className="sheet assistant-sheet" role="dialog" aria-modal="true" aria-label="Ballava AI" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="sheet assistant-sheet" role="dialog" aria-modal="true" aria-label="Ballava Chef" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="sheet-inner assistant">
         <div className="assistant-head">
-          <span className="assistant-mark" aria-hidden="true">✨</span>
+          <span className="assistant-mark" aria-hidden="true">🧑‍🍳</span>
           <div className="assistant-title">
-            <b>Ballava AI</b>
+            <b>Ballava Chef</b>
             <span className={'ai-status ' + (ai ? 'on' : 'off')}>{ai ? `Connected to ${aiStatus.provider || 'AI'}` : 'AI is off · quick answers'}</span>
           </div>
           <button className={'icon-btn sm head-btn' + (showChats ? ' on' : '')} onClick={() => setShowChats(v => !v)} aria-label={`Your chats (${chats.list.length})`} aria-pressed={showChats} title="Your chats">🕘</button>
           <button className="icon-btn sm head-btn" onClick={() => { chats.startNew(); setShowChats(false); stopSpeaking(); }} aria-label="New chat" title="New chat">＋</button>
-          <button className="icon-btn sm head-btn" onClick={onClose} aria-label="Close Ballava AI">✕</button>
+          <button className="icon-btn sm head-btn" onClick={onClose} aria-label="Close Ballava Chef">✕</button>
         </div>
 
         {showChats ? (
           <div className="chat-list" aria-label="Your chats">
-            <div className="row between"><b>Your chats</b><span className="muted small">Kept on this phone only</span></div>
+            <div className="row between"><b>Your chats</b><span className="muted small">{signedIn ? 'Saved in your account' : 'Saved on this phone · sign in to keep them everywhere'}</span></div>
             {chats.list.length === 0 && <p className="muted">No chats yet. Ask me anything and it'll be saved here.</p>}
             {chats.list.map(c => (
               <div key={c.id} className={'chat-list-item' + (c.id === chats.chat?.id ? ' on' : '')}>
@@ -237,6 +288,15 @@ export default function Assistant({ screen, param, onClose, ctx }) {
               </div>
             ))}
             {busy && <div className="bubble bot typing" role="status"><span className="dots" aria-hidden="true"><i /><i /><i /></span> {busy}</div>}
+            {!chats.chat && chats.list.length > 0 && (
+              <div className="recent-chats" aria-label="Your recent chats">
+                <span className="muted small">Pick up where you left off</span>
+                {chats.list.slice(0, 3).map(c => (
+                  <button key={c.id} className="recent-chat" onClick={() => chats.open(c.id)}>🕘 {c.title} <small className="muted">· {ago(c.at)}</small></button>
+                ))}
+                {chats.list.length > 3 && <button className="btn link sm" onClick={() => setShowChats(true)}>All {chats.list.length} chats</button>}
+              </div>
+            )}
             <div ref={end} />
           </div>
         )}
@@ -264,8 +324,8 @@ export default function Assistant({ screen, param, onClose, ctx }) {
 // Only in cook mode, where the navigation bar is hidden.
 export function AssistantButton({ onOpen }) {
   return (
-    <button className="fab" onClick={onOpen} aria-label="Open Ballava AI" title="Ballava AI">
-      <span aria-hidden="true">✨</span><span className="fab-label">AI</span>
+    <button className="fab" onClick={onOpen} aria-label="Open Ballava Chef" title="Ballava Chef">
+      <span aria-hidden="true">🧑‍🍳</span><span className="fab-label">Chef</span>
     </button>
   );
 }

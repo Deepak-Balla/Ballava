@@ -20,6 +20,8 @@ urlpatterns = [
     path('household/rename', api.rename_household),
     path('account/export', api.export_account),
     path('account/delete', api.delete_account),
+    path('chats', api.chats),
+    path('chats/delete', api.delete_chats),
     path('polls', api.create_poll),
     path('polls/<str:token>', api.get_poll),
     path('polls/<str:token>/vote', api.cast_vote),
