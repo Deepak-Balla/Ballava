@@ -1,14 +1,18 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Header, ingName } from '../ui.jsx';
-import { api, go, shrinkImage } from '../lib.js';
+import { api, go } from '../lib.js';
+import PhotoScan from '../PhotoScan.jsx';
 
-export default function AiChef({ aiStatus, pantry, members, aiRecipes, setAiRecipes, addToPantry, notify }) {
+// Recipe Studio: a simple form for when you know what you want. Type a dish (or nothing), pick a meal, get one full
+// recipe card to cook, save and plan. Ballava Chef (the chat) does the same and more by conversation; this is the
+// one-tap version, plus the fridge-photo scanner.
+export default function AiChef({ aiStatus, refreshAi, pantry, setPantry, members, aiRecipes, setAiRecipes, addToPantry, notify }) {
   const [wish, setWish] = useState('');
   const [meal, setMeal] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
-  const [scan, setScan] = useState(null); // {found: [], unknown: []}
-  const [pick, setPick] = useState(new Set());
+  const [scan, setScan] = useState(null); // what the last photo added
+  useEffect(() => { refreshAi?.(); }, []);
 
   if (!aiStatus.ai) {
     return (
@@ -17,7 +21,8 @@ export default function AiChef({ aiStatus, pantry, members, aiRecipes, setAiReci
         <div className="card">
           <h3>Recipe Studio needs AI</h3>
           <p>Everything else in Ballava works without AI. Recipe Studio adds:</p>
-          <ul><li>Inventing brand-new dishes from exactly what's in your kitchen</li><li>Reading a photo of your fridge or shelf</li></ul>
+          <ul><li>The full recipe for any dish you name, with what you're missing</li><li>Inventing new dishes from exactly what's in your kitchen</li><li>Reading a photo of your fridge or shelf</li></ul>
+          <button className="btn sm" onClick={() => refreshAi?.()}>Check again</button>
           {aiStatus.server
             ? <p className="muted small">For the app owner: in the <code>.env</code> file, choose the AI with <code>AI_PROVIDER</code> (gemini or claude), add its key (<code>GEMINI_API_KEY</code> or <code>ANTHROPIC_API_KEY</code>), and restart the server. See the guide, step 8.</p>
             : <p className="muted small">This copy of Ballava is running without its server (for example, as an online demo), so AI features aren't available here.</p>}
@@ -46,24 +51,12 @@ export default function AiChef({ aiStatus, pantry, members, aiRecipes, setAiReci
     setBusy('');
   }
 
-  async function onPhoto(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setBusy('scan'); setError(''); setScan(null);
-    try {
-      const image = await shrinkImage(file);
-      const data = await api('ai/scan', { image, mediaType: 'image/jpeg' });
-      setScan(data); setPick(new Set(data.found));
-    } catch (err) { setError(err.message); }
-    setBusy(''); e.target.value = '';
-  }
-
   return (
     <div className="screen">
       <Header title="✨ Recipe Studio" back="more" />
       <div className="card">
         <h3>Get any recipe, or invent one</h3>
-        <p className="muted small">Name a dish ("chicken biryani") and you get exactly that recipe, with what you're missing. Or leave it empty to invent something from your kitchen.</p>
+        <p className="muted small">The quick way to one full recipe card: name a dish ("chicken biryani") and you get exactly that recipe, with what you're missing. Or leave it empty to invent something from your kitchen. For questions and back-and-forth, use 🧑‍🍳 Chef.</p>
         <p className="muted small">Uses your {pantry.length} kitchen items{members.length ? ' and your family\'s needs' : ''}. Calories are worked out for you.</p>
         <div className="chips wrap" role="group" aria-label="Meal">
           {[['', 'Any meal'], ['breakfast', 'Breakfast'], ['lunch', 'Lunch'], ['dinner', 'Dinner'], ['snack', 'Snack']].map(([id, label]) => (
@@ -78,23 +71,21 @@ export default function AiChef({ aiStatus, pantry, members, aiRecipes, setAiReci
       </div>
 
       <div className="card">
-        <h3>Scan my fridge</h3>
-        <p className="muted small">Take a photo of your fridge, shelf or vegetable basket. AI lists what it sees, and you confirm.</p>
-        <label className="btn ghost file">{busy === 'scan' ? 'Looking at your photo…' : '📷 Take or choose a photo'}
-          <input type="file" accept="image/*" capture="environment" onChange={onPhoto} disabled={!!busy} hidden />
-        </label>
+        <h3>📷 Scan my fridge</h3>
+        <p className="muted small">Take a photo of your fridge, shelf or vegetable basket. AI spots the items and adds them to your kitchen (you can undo).</p>
+        <PhotoScan label="📷 Take or choose a photo" addToPantry={addToPantry} notify={notify} onStart={() => setScan({ busy: true })} onScanned={setScan} />
         {scan && (
-          <div className="scan">
-            {scan.found.length === 0 && <p>I couldn't spot any ingredients. Try a closer, brighter photo.</p>}
-            <div className="chips wrap">
-              {scan.found.map(id => (
-                <button key={id} className={'chip' + (pick.has(id) ? ' on' : '')} onClick={() => { const n = new Set(pick); n.has(id) ? n.delete(id) : n.add(id); setPick(n); }}>
-                  {pick.has(id) ? '✓ ' : ''}{ingName(id)}
-                </button>
-              ))}
-            </div>
-            {scan.unknown?.length > 0 && <p className="muted small">Also saw: {scan.unknown.join(', ')}</p>}
-            {pick.size > 0 && <button className="btn primary" onClick={() => { const a = addToPantry([...pick]); notify(`Added ${a.length} item(s) to your kitchen`); setScan(null); }}>Add {pick.size} to my kitchen</button>}
+          <div className="scan" role="status">
+            {scan.busy ? <p className="muted">Looking at your photo…</p> : scan.error ? <p className="note bad">{scan.error}</p> : (
+              <>
+                <p>{scan.added.length ? <>Added <b>{scan.added.map(ingName).join(', ')}</b> to your kitchen.</> : scan.found.length ? 'You already had everything I could see.' : "I couldn't spot any ingredients. Try a closer, brighter photo."}</p>
+                {scan.unknown?.length > 0 && <p className="muted small">Also saw: {scan.unknown.join(', ')}</p>}
+                <div className="row">
+                  {scan.added.length > 0 && <button className="btn sm" onClick={() => { setPantry(p => p.filter(x => !scan.added.includes(x.id))); setScan(null); notify('Undone.'); }}>Undo</button>}
+                  {scan.found.length > 0 && <button className="btn primary sm" onClick={() => { setWish(''); invent(); }}>Invent a dish with these</button>}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

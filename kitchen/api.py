@@ -21,7 +21,7 @@ from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 
-from . import ai, assistant, catalog, engine, planner
+from . import ai, assistant, catalog, engine, planner, retention
 from .models import AiUsage, ChatThread, FamilyData, Household, Poll, Profile, Vote
 from .security import ApiError, auth_config, check_code, clear_limit, client_ip, limited, request_code
 
@@ -111,7 +111,7 @@ def new_family_user(name, *, email=None, phone=None, password=None):
 @endpoint(methods=('GET',))
 def health(request, body):
     on = bool(ai.ai_key())
-    return {'ok': True, 'ai': on, 'aiProvider': ai.provider_label() if on else None, 'version': '2.1.0'}
+    return {'ok': True, 'ai': on, 'aiProvider': ai.provider_label() if on else None, 'retentionDays': retention.days(), 'version': '2.2.0'}
 
 
 @endpoint(methods=('GET',))
@@ -206,6 +206,7 @@ def logout_view(request, body):
 
 @endpoint(methods=('GET',))
 def me(request, body):
+    retention.maybe_cleanup()  # once a day: remove what's older than 6 months
     user = app_user(request)
     if not user:
         return {'user': None}
@@ -230,6 +231,12 @@ def state(request, body):
         raise ApiError(400, 'Unknown data type.')
     if value is None:
         raise ApiError(400, 'Nothing to save.')
+    # Anything older than 6 months is never stored again, even if an old phone still has it.
+    saved_ids = None
+    if key == 'aiRecipes':
+        saved = FamilyData.objects.filter(household=user.profile.household, key='savedDishes').values_list('value', flat=True).first()
+        saved_ids = {s.get('id') for s in (saved or []) if isinstance(s, dict)}
+    value = retention.prune_value(key, value, saved_ids=saved_ids)
     with transaction.atomic():
         row = FamilyData.objects.select_for_update().filter(household=user.profile.household, key=key).first()
         current = row.version if row else 0
@@ -303,7 +310,7 @@ MAX_CHATS, MAX_CHAT_MESSAGES = 50, 100
 CHAT_ID = re.compile(r'[a-z0-9]{4,40}')
 # What a saved message may hold (the same fields the phone shows). Anything else is dropped.
 MESSAGE_TEXT = {'from': 10, 'text': 4000, 'recipeId': 60, 'warning': 200, 'source': 20, 'note': 300}
-MESSAGE_LISTS = {'dishes': 60, 'shopping': 60, 'followups': 80, 'found': 60}
+MESSAGE_LISTS = {'dishes': 60, 'shopping': 60, 'followups': 80, 'found': 60, 'added': 60}
 
 
 def clean_message(m):
@@ -311,7 +318,7 @@ def clean_message(m):
         return None
     out = {k: str(m[k])[:n] for k, n in MESSAGE_TEXT.items() if m.get(k) not in (None, '')}
     out.update({k: [str(x)[:n] for x in m[k][:15]] for k, n in MESSAGE_LISTS.items() if isinstance(m.get(k), list) and m[k]})
-    for k in ('error', 'done'):
+    for k in ('error', 'done', 'undone'):
         if m.get(k) is True:
             out[k] = True
     if isinstance(m.get('at'), (int, float)):

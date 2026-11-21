@@ -114,14 +114,16 @@ After 5 wrong admin passwords, that login is locked for 15 minutes.
 .venv\Scripts\python -m pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest
 ```
-This runs **183 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `183 passed`. The tests never call a real AI or use your keys.
+This runs **190 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `190 passed`. The tests never call a real AI or use your keys.
 
 **Real-browser checks (about a minute):**
 ```
 .venv\Scripts\python -m playwright install chromium
 .venv\Scripts\python -m pytest -m e2e
 ```
-This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, vote, and publish a recipe as an admin. Screenshots go to `test-screenshots/`. You should see `45 passed`.
+This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, vote, and publish a recipe as an admin. It also tries hands-free cooking with a pretend microphone, a fridge photo with a pretend AI, and the computer layout. Screenshots go to `test-screenshots/`. You should see `48 passed`.
+
+> The tests switch AI **off** on purpose (so they never use your key or your free limit). That's why the test screenshots say "AI is off"; your own app is not affected.
 
 ## 6. Run Ballava with Docker (optional)
 
@@ -157,7 +159,8 @@ What the Docker setup does: it builds the phone screens with Node.js, installs P
   - **Ask for any dish by name and you get exactly that dish.** "Chicken biryani" gives chicken biryani, never something else. If it's in the recipe book you get that recipe; if not, the AI writes it. Either way you see **what you're missing**, with **🛒 Add missing** for your shopping list. If it breaks a family rule (for example meat for a vegetarian), you still get it, with a clear warning.
   - Every answer's dishes come with **Open recipe**, **🛒 Add missing**, **📅 Tomorrow** (adds it to tomorrow's plan) and **♡ Save**, plus suggested follow-up questions.
   - **🕘 Your chats:** every conversation is saved. When you're signed in they're kept in your account (private to you, not shared with the family or shown to admins), so they survive signing out and follow you to your other phones and computers. Without an account they stay on that device. Open an old one to carry on (a new chat shows your recent ones), start a **＋ New chat**, or delete them.
-  - 📷 reads a fridge photo, 🎤 listens, 🔊 reads answers aloud. The window shows which AI is connected.
+  - 📷 **Photo of your fridge:** tap 📷, then **Take a photo** (a phone opens its camera; a computer with a webcam opens a live camera in the app) or **Choose a photo**. The AI names what it sees and the items go **straight into your kitchen**, with **Undo**. The same 📷 button is in the **Kitchen** tab, next to 🎤, and in Recipe Studio.
+  - 🎤 listens, 🔊 reads answers aloud. The window shows which AI is connected, and checks again each time it opens.
 - **Recipe Studio (More → Recipe Studio, or the button on the Cook screen):** name a dish for its exact recipe, or leave it empty to invent one from your kitchen for a chosen meal. Dishes already in the recipe book open straight away, with no AI needed.
 - **Calories for food from outside:** on the Dashboard, **✨ Estimate** asks the AI for the calories of a meal like "pizza from outside" (or type them yourself).
 - Every AI answer is checked before you see it: only real recipes are linked, and the AI never *suggests* a new dish that breaks a family rule (diet, Jain, allergies, diabetes). A dish you ask for by name always comes, with a clear warning if it breaks one. Diet and allergens of AI recipes are worked out from the ingredients, not just from what the AI claims, and calories are counted by Ballava when it knows the ingredients.
@@ -191,6 +194,16 @@ Good to know:
 - Keep keys secret: never share `.env` or put keys in the code. Keys stay on the server and browsers never see them.
 - Each family can make at most 10 AI requests per minute (`AI_RATE_LIMIT`).
 - Both AIs get the same safety rules, and their answers go through the same checks. With Claude, if the AI declines a request for safety reasons, Anthropic automatically retries it on a suitable fallback model.
+
+**Chef or Recipe Studio?** Both use the same AI. **Chef** is a conversation: ask anything, follow up, get several ideas, plan and shop from the answers. **Recipe Studio** (More → Recipe Studio) is the one-tap form: type a dish (or nothing), pick a meal, and get one full recipe card, plus the fridge-photo scanner.
+
+**Hands-free cooking** (in cook mode, Chrome or Edge): tick **🎤 Hands-free**, then say **"next"**, **"back"**, **"repeat"**, **"timer 5 minutes"** (or just "timer" on a step with a time), **"whistle"** (counts a pressure-cooker whistle), **"done"** on the last step, **"stop"** to stop reading, or **"help"**. Hindi works too: aage, peeche, dobara, seeti. Every new step is read aloud, a box shows when it's listening and what it heard, and it ignores its own voice reading the steps. The microphone works on `localhost` and on `https` sites; on a plain `http://192.168…` address, phones block it.
+
+## Your data: kept in your account, for 6 months
+
+- **Everything you do is saved in your account:** kitchen, family, plan, shopping list, food diary, saved (❤️) dishes, AI recipes, your calorie goal and name, and your chats with Chef. Sign out and in again, or use another phone or computer, and it's all there. (Signing out clears the phone itself, because phones get shared.)
+- **After 6 months it goes:** each diary meal, saved dish, AI recipe (unless still saved) and chat is deleted 6 months after its date, and a family account nobody has used for 6 months is deleted with its data. Your kitchen, family and plan stay while you use Ballava. Admin accounts are never removed.
+- This happens **by itself once a day**. To run it now: `.venv\Scripts\python manage.py cleanup_old_data` (Docker: `docker compose exec web python manage.py cleanup_old_data`). Change the period with `DATA_RETENTION_DAYS` in `.env` (`0` keeps everything). The admin dashboard shows the last clean-up.
 
 ## 9. Phone sign-in
 
@@ -251,7 +264,7 @@ ballava/
 | The page says "Loading recipes…" forever | The server isn't running, or the phone can't reach it. Start `runserver` and refresh. |
 | Typing ingredients doesn't work offline | Reading typed words happens on the server. Offline, pick items from the list instead. |
 | Forgot the admin password | `.venv\Scripts\python manage.py changepassword you@example.com` |
-| Chef says "AI is off", or Recipe Studio says it needs AI | Check `.env` has `AI_PROVIDER=gemini` with `GEMINI_API_KEY=...` (or `claude` with `ANTHROPIC_API_KEY=...`), then restart the server. |
+| Chef says "AI is off", or Recipe Studio says it needs AI | First reload the page (or tap **Check again**): the app may have opened while the server was restarting. If it still says so, check `.env` has `AI_PROVIDER=gemini` with `GEMINI_API_KEY=...` (or `claude` with `ANTHROPIC_API_KEY=...`), then restart the server. |
 | Chef says "free AI limit is used up" | Gemini's free daily limit is reached. Wait (it resets daily), or switch to `AI_PROVIDER=claude`. |
 | Page looks old after an update | Refresh hard: **Ctrl + Shift + R**. |
 | "no such column" after an update | Run `.venv\Scripts\python manage.py migrate` (Docker does this by itself when it starts). |

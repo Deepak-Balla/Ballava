@@ -230,6 +230,13 @@ class Festival(models.Model):
         return f'{self.name} ({self.date})'
 
 
+class Housekeeping(models.Model):
+    """When a regular clean-up job last ran, and what it did (shown on the admin dashboard)."""
+    name = models.CharField(max_length=40, primary_key=True)
+    last_run = models.DateField()
+    details = models.JSONField(default=dict)
+
+
 class CatalogStamp(models.Model):
     """Goes up whenever admins change content, so every server process reloads the recipe book."""
     value = models.PositiveIntegerField(default=0)

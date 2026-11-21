@@ -43,6 +43,8 @@ export function listenOnce(onText, onEnd) {
 }
 
 // ---- Read aloud (text to speech).
+// Hands-free mode must not hear the app's own voice as a command, so we remember when we last spoke.
+let speakingUntil = 0;
 export function speak(text) {
   try {
     if (!('speechSynthesis' in window)) return;
@@ -50,10 +52,13 @@ export function speak(text) {
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'en-IN';
     u.rate = 0.95;
+    speakingUntil = Date.now() + 60000; // until it finishes (or a minute, if the browser never says)
+    u.onend = u.onerror = () => { speakingUntil = Date.now() + 1200; }; // the tail of our voice can still arrive
     speechSynthesis.speak(u);
   } catch { /* ignore */ }
 }
-export function stopSpeaking() { try { speechSynthesis.cancel(); } catch { /* ignore */ } }
+export function stopSpeaking() { try { speechSynthesis.cancel(); speakingUntil = Math.min(speakingUntil, Date.now() + 600); } catch { /* ignore */ } }
+export const isSpeaking = () => Date.now() < speakingUntil || (typeof speechSynthesis !== 'undefined' && speechSynthesis.speaking);
 
 // ---- Alarm beep + vibration for timers.
 let audioCtx;

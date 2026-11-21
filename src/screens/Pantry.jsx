@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { getCatalog, daysLeft, useSoon, ingredient } from '../catalog.js';
 import { Header, ingName, expiryLabel } from '../ui.jsx';
 import { SpeechRec, listenOnce, api } from '../lib.js';
+import PhotoScan from '../PhotoScan.jsx';
 
 const DAY = 86400000;
 
@@ -11,6 +12,7 @@ export default function Pantry({ pantry, setPantry, addToPantry, notify }) {
   const [listening, setListening] = useState(false);
   const [cat, setCat] = useState('Vegetables');
   const [confirmClear, setConfirmClear] = useState(false);
+  const [scanned, setScanned] = useState(null); // what the last photo added
   const have = new Set(pantry.map(p => p.id));
 
   // Python (kitchen/engine.py) understands what was typed: "2 tamatar, pyaz" -> tomato, onion.
@@ -57,9 +59,33 @@ export default function Pantry({ pantry, setPantry, addToPantry, notify }) {
         <input value={text} onChange={e => setText(e.target.value)} aria-label="Add ingredients"
           placeholder="e.g. 2 tamatar, pyaz, paneer, leftover rice" />
         {SpeechRec && <button type="button" className={'icon-btn mic' + (listening ? ' live' : '')} onClick={mic} aria-label="Speak ingredients">🎤</button>}
+        <PhotoScan compact addToPantry={addToPantry} notify={notify} onStart={() => setScanned({ busy: true })} onScanned={setScanned} />
         <button className="btn primary" type="submit">Add</button>
       </form>
-      <p className="muted small">Tip: use any language's names: aloo, palak, kodi, pesarapappu… Salt, oil and water are always assumed.</p>
+      <p className="muted small">Type, 🎤 say, or 📷 snap a photo of your fridge. Any language's names work: aloo, palak, kodi, pesarapappu… Salt, oil and water are always assumed.</p>
+
+      {scanned && (
+        <div className="card scan-result" role="status">
+          {scanned.busy ? <p className="muted">📷 Looking at your photo…</p> : scanned.error ? (
+            <p className="note bad">{scanned.error}</p>
+          ) : (
+            <>
+              <h3>📷 From your photo</h3>
+              {scanned.added.length > 0
+                ? <p>Added <b>{scanned.added.map(ingName).join(', ')}</b> to your kitchen.</p>
+                : <p className="muted">{scanned.found.length ? 'You already had everything I could see.' : "I couldn't spot any ingredients. Try a closer, brighter photo."}</p>}
+              {scanned.found.length > scanned.added.length && scanned.added.length > 0 && <p className="muted small">Already in your kitchen: {scanned.found.filter(id => !scanned.added.includes(id)).map(ingName).join(', ')}</p>}
+              {scanned.unknown?.length > 0 && <p className="muted small">Also saw (not in Ballava's list yet): {scanned.unknown.join(', ')}</p>}
+            </>
+          )}
+          {!scanned.busy && (
+            <div className="row">
+              {scanned.added?.length > 0 && <button className="btn sm" onClick={() => { setPantry(p => p.filter(x => !scanned.added.includes(x.id))); notify('Undone. Those items were removed.'); setScanned(null); }}>Undo</button>}
+              <button className="btn link sm" onClick={() => setScanned(null)}>Close</button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="kits">
         {KITS.map(k => (

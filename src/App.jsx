@@ -18,7 +18,7 @@ import Account from './screens/Account.jsx';
 import Login from './screens/Login.jsx';
 import Vote from './screens/Vote.jsx';
 import Saved from './screens/Saved.jsx';
-import Assistant, { AssistantButton } from './Assistant.jsx';
+import Assistant from './Assistant.jsx';
 
 const isGuest = () => { try { return localStorage.getItem('ballava.guest') === '1'; } catch { return false; } };
 
@@ -73,9 +73,41 @@ export default function App() {
     else await startSync({ merge, onLost: sessionLost });
   }, [sessionLost]);
 
+  // Is the AI switched on? Asked when the app opens, again whenever Chef or Recipe Studio opens,
+  // and when you come back to the tab, so a server restart or a newly added key never leaves it stuck on "off".
+  const refreshAi = useCallback(() => api('health')
+    .then(d => { setAiStatus({ checked: true, ai: !!d.ai, provider: d.aiProvider || null, server: true, retentionDays: d.retentionDays }); return d; })
+    .catch(() => setAiStatus(s => ({ ...s, checked: true, server: false }))), []);
   useEffect(() => {
-    api('health').then(d => setAiStatus({ checked: true, ai: !!d.ai, provider: d.aiProvider || null, server: true }))
-      .catch(() => setAiStatus({ checked: true, ai: false, server: false }));
+    const onFocus = () => refreshAi();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refreshAi]);
+
+  // Ballava keeps things for 6 months (the server decides how long). Old meals, saved dishes and AI recipes are
+  // trimmed on this phone too, so they don't linger offline or for people using it without an account.
+  useEffect(() => {
+    const days = aiStatus.retentionDays;
+    if (!days) return;
+    const cutMs = Date.now() - days * 86400000;
+    const cutDay = dayKey(cutMs);
+    const fresh = h => (h.date ? h.date >= cutDay : (h.at || 0) >= cutMs);
+    if (history.some(h => !fresh(h))) setHistory(hs => hs.filter(fresh));
+    if (savedDishes.some(s => s.at && s.at < cutMs)) setSavedDishes(ss => ss.filter(s => !s.at || s.at >= cutMs));
+    const keep = new Set(savedDishes.map(s => s.id));
+    if (Object.values(aiRecipes).some(r => r.createdAt && r.createdAt < cutMs && !keep.has(r.id))) {
+      setAiRecipes(rs => Object.fromEntries(Object.entries(rs).filter(([id, r]) => !r.createdAt || r.createdAt >= cutMs || keep.has(id))));
+    }
+    try {
+      const chats = JSON.parse(localStorage.getItem('ballava.chats') || 'null');
+      if (chats?.list?.some(c => (c.at || 0) < cutMs)) {
+        localStorage.setItem('ballava.chats', JSON.stringify({ ...chats, list: chats.list.filter(c => (c.at || 0) >= cutMs) }));
+      }
+    } catch { /* nothing saved */ }
+  }, [aiStatus.retentionDays]);
+
+  useEffect(() => {
+    refreshAi();
     loadMe().catch(() => {
       // No connection: if this device was signed in, keep working from what it has.
       let cached = null;
@@ -165,7 +197,7 @@ export default function App() {
   const ctx = {
     pantry, setPantry, addToPantry, members, setMembers, shopping, setShopping, addToShopping, history, setHistory, log, logMeal, ratings, aiRecipes, setAiRecipes,
     filters, setFilters, notify, aiStatus, findRecipe, plan, setPlan, pins, setPins, prefs, setPrefs, catalog, family, auth, loadMe, signedOut,
-    savedDishes, isSaved, toggleSave, openAssistant: () => setChatOpen(true),
+    savedDishes, isSaved, toggleSave, openAssistant: () => setChatOpen(true), refreshAi,
   };
 
   let body;
@@ -201,7 +233,6 @@ export default function App() {
   return (
     <div className={'app' + (hideNav ? ' no-nav' : '') + (chatOpen ? ' chat-open' : '')}>
       <main>{body}</main>
-      {hideNav && !chatOpen && <AssistantButton onOpen={() => setChatOpen(true)} />}
       {chatOpen && <Assistant screen={screen} param={param} onClose={() => setChatOpen(false)} ctx={ctx} />}
       {toast && <div className="toast" role="status">{toast}</div>}
       {!hideNav && (

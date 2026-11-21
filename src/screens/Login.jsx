@@ -5,7 +5,7 @@ function Consent({ value, onChange }) {
   return (
     <label className="check consent">
       <input type="checkbox" checked={value} onChange={e => onChange(e.target.checked)} />
-      <span>I agree that Ballava stores my family's food and health details (like diets, allergies and meals) to personalise suggestions. I can download or delete them anytime.</span>
+      <span>I agree that Ballava stores my family's food and health details (like diets, allergies and meals) to personalise suggestions. Meals, saved dishes and chats are deleted after 6 months, and so is an account nobody uses for 6 months. I can download or delete everything anytime.</span>
     </label>
   );
 }

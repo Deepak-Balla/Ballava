@@ -423,6 +423,7 @@ def normalize_ai_recipe(raw):
         'hasChilli': any(first(it) in ('green_chilli', 'red_chilli_powder', 'dry_red_chilli') for it in ing),
     }
     recipe['nutrition'] = _ai_nutrition(recipe, raw.get('nutrition'))
+    recipe['createdAt'] = now_ms()  # AI recipes are kept for 6 months unless saved (kitchen/retention.py)
     if raw.get('requested') is True:
         recipe['requested'] = True  # the user asked for this dish by name
     return recipe

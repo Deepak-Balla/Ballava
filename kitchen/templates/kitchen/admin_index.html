@@ -79,6 +79,17 @@
     </div>
     <p class="b-muted">Ballava Chef (the chat) and Recipe Studio. Each family can make at most {{ ballava_ai_limit }} AI requests a minute.</p>
   </section>
+
+  <section class="b-card">
+    <h3>🧹 Data is kept for {% if ballava_retention.days %}{{ ballava_retention.days }} days{% else %}ever (clean-up is off){% endif %}</h3>
+    <p class="b-muted">Diary meals, saved dishes, AI recipes and chats older than that are deleted, and so are family accounts nobody has used for that long. Admin accounts are never removed. Change it with <code>DATA_RETENTION_DAYS</code>.</p>
+    {% if ballava_retention.last %}
+    <ul>
+      <li><span>Last clean-up</span><b>{{ ballava_retention.last.last_run }}</b></li>
+      {% for kind, n in ballava_retention.last.details.items %}{% if n %}<li><span>Removed {{ kind }}</span><b>{{ n }}</b></li>{% endif %}{% endfor %}
+    </ul>
+    {% else %}<p class="b-empty">The first clean-up runs when someone next opens the app.</p>{% endif %}
+  </section>
 </div>
 
 <p class="help" style="margin-bottom:16px">Family kitchens, diets, health goals and meal diaries are private and are not shown in this portal.</p>

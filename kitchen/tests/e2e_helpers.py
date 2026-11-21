@@ -100,6 +100,35 @@ def open_chef(page):
 
 WIDE = {'viewport': {'width': 1440, 'height': 900}}
 
+# A 1x1 picture, for "choose a photo" in tests.
+PHOTO = {'name': 'fridge.png', 'mimeType': 'image/png', 'buffer': __import__('base64').b64decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==')}
+
+# A pretend microphone and voice, so hands-free mode can be tested: window.__say('next') is "heard",
+# and everything the app reads aloud is collected in window.__spoken.
+FAKE_VOICE = """
+(() => {
+  class FakeRecognition {
+    start() { window.__rec = this; setTimeout(() => this.onstart && this.onstart(), 0); }
+    stop() { setTimeout(() => this.onend && this.onend(), 0); }
+    abort() { this.aborted = true; }
+  }
+  window.SpeechRecognition = FakeRecognition;
+  window.webkitSpeechRecognition = FakeRecognition;
+  window.__say = text => {
+    const result = [{ transcript: text }];
+    result.isFinal = true;
+    window.__rec.onresult({ resultIndex: 0, results: [result] });
+  };
+  window.__spoken = [];
+  Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
+    speaking: false, cancel() {}, getVoices() { return []; },
+    speak(u) { window.__spoken.push(u.text); setTimeout(() => u.onend && u.onend(), 5); },
+  } });
+  window.SpeechSynthesisUtterance = function (text) { this.text = text; };
+})();
+"""
+
 
 def no_sideways_scroll(page, where):
     over = page.evaluate('document.documentElement.scrollWidth - window.innerWidth')

@@ -356,6 +356,30 @@ def test_phone_sign_in(device, site):
     p.context.close()
 
 
+def test_everything_is_still_there_after_signing_in_again(device, site):
+    p = device()
+    sign_in(p, site)
+    p.goto(site + '#/recipe/kanda_poha')
+    p.get_by_role('button', name='Save Kanda Poha').click()
+    p.get_by_text(re.compile('Saved Kanda Poha')).wait_for()
+    tab(p, 'Dashboard')
+    p.get_by_role('button', name=re.compile('Daily goal')).click()
+    p.get_by_label('Daily calorie goal per person').fill('1650')
+    p.get_by_role('button', name='Save', exact=True).click()
+    p.get_by_text('of 1,650 kcal').wait_for()
+    p.wait_for_timeout(1500)  # let the changes upload
+    more(p, 'Account')
+    p.get_by_role('button', name='Sign out').click()
+    p.get_by_text('Continue without an account').wait_for()
+    assert p.evaluate("localStorage.getItem('ballava.savedDishes')") in (None, '[]'), 'signing out clears this phone'
+
+    sign_in(p, site)
+    p.get_by_text('of 1,650 kcal').wait_for()
+    more(p, 'Saved dishes')
+    p.locator('.dish-title', has_text='Kanda Poha').wait_for()
+    p.context.close()
+
+
 def test_admin_signs_in_from_the_admin_tab(device, site):
     p = device()
     p.goto(site)

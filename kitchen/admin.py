@@ -22,7 +22,7 @@ from django.utils import timezone
 
 from . import catalog, engine
 from .data.recipes import RECIPES
-from .models import AiUsage, Announcement, FamilyData, Festival, HiddenRecipe, Household, Ingredient, Recipe, Rescue
+from .models import AiUsage, Announcement, FamilyData, Festival, HiddenRecipe, Household, Housekeeping, Ingredient, Recipe, Rescue
 from .security import clear_limit, client_ip, limited
 
 BUILT_IN = {r['id']: r for r in RECIPES}
@@ -128,6 +128,7 @@ class BallavaAdminSite(admin.AdminSite):
             'ballava_recent': LogEntry.objects.select_related('user', 'content_type').order_by('-action_time')[:8],
             'ballava_ai_days': [(d.strftime('%a'), calls.get(d, 0), round(calls.get(d, 0) / top * 100)) for d in days],
             'ballava_ai_limit': settings.AI_RATE_LIMIT,
+            'ballava_retention': {'days': settings.DATA_RETENTION_DAYS, 'last': Housekeeping.objects.filter(name='retention').first()},
             'ballava_greeting': 'Good morning' if hour < 12 else 'Good afternoon' if hour < 17 else 'Good evening',
             **(extra_context or {}),
         })

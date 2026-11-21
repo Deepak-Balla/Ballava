@@ -4,8 +4,9 @@
 // Every conversation is kept: on this phone, and when you're signed in also in your account (kitchen/api.py -> chats),
 // private to you, so your chats survive signing out and follow you to your other devices.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { api, go, listenOnce, SpeechRec, speak, stopSpeaking, shrinkImage } from './lib.js';
+import { api, go, listenOnce, SpeechRec, speak, stopSpeaking } from './lib.js';
 import { ingName, missingFor, lineName, slotFor, dayKey, addDays, SLOT_LABEL } from './catalog.js';
+import PhotoScan from './PhotoScan.jsx';
 
 const hello = name => ({ from: 'bot', text: `Hi${name ? ' ' + name : ''}! I'm Ballava Chef 🧑‍🍳 Ask me for any recipe by name, what to cook with what you have, calories, swaps, tiffin ideas, or how to fix a dish.` });
 const KEY = 'ballava.chats';
@@ -177,7 +178,12 @@ function BotExtras({ m, i, ctx, close, update }) {
           {m.done ? '✓ Added to shopping list' : `🛒 Add ${m.shopping.map(ingName).join(', ')} to the list`}
         </button>
       )}
-      {m.found?.length > 0 && (
+      {m.added?.length > 0 && (
+        <button className="btn sm chat-action" disabled={m.undone} onClick={() => { ctx.setPantry(p => p.filter(x => !m.added.includes(x.id))); update(i, { undone: true }); notify('Undone. Those items were removed from your kitchen.'); }}>
+          {m.undone ? '↩ Removed again' : `↩ Undo (remove ${m.added.length} item${m.added.length > 1 ? 's' : ''})`}
+        </button>
+      )}
+      {m.found?.length > 0 && !m.added && (
         <button className="btn sm chat-action" disabled={m.done} onClick={() => { const a = addToPantry(m.found); update(i, { done: true }); notify(a.length ? `Added ${a.length} item(s) to your kitchen` : 'Already in your kitchen'); }}>
           {m.done ? '✓ Added to my kitchen' : `🧺 Add ${m.found.length} item(s) to my kitchen`}
         </button>
@@ -202,6 +208,7 @@ export default function Assistant({ screen, param, onClose, ctx }) {
   const ai = !!aiStatus.ai;
 
   useEffect(() => { end.current?.scrollIntoView?.({ block: 'end' }); }, [messages, busy, showChats]);
+  useEffect(() => { ctx.refreshAi?.(); }, []); // the AI may have been switched on (or the server restarted) since the page opened
   useEffect(() => {
     const onKey = e => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
@@ -228,22 +235,18 @@ export default function Assistant({ screen, param, onClose, ctx }) {
     setBusy('');
   }
 
-  async function onPhoto(e) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || busy) return;
-    chats.add({ from: 'me', text: '📷 What can you see in this photo?', at: Date.now() });
-    setBusy('Looking at your photo…');
-    try {
-      const image = await shrinkImage(file);
-      const data = await api('ai/scan', { image, mediaType: 'image/jpeg' });
-      const seen = [...data.found.map(ingName), ...(data.unknown || [])];
-      chats.add({ from: 'bot', text: seen.length ? `I can see: ${seen.join(', ')}.` : "I couldn't spot any ingredients. Try a closer, brighter photo.", found: data.found, at: Date.now() });
-    } catch (err) {
-      chats.add({ from: 'bot', text: err.message, error: true, at: Date.now() });
-    }
+  // 📷 A photo of the fridge: the items go straight into the kitchen (with Undo), and Chef says what it saw.
+  const photoStart = () => { chats.add({ from: 'me', text: '📷 Add what you can see in this photo to my kitchen', at: Date.now() }); setBusy('Looking at your photo…'); };
+  const photoDone = data => {
     setBusy('');
-  }
+    if (data.error) { chats.add({ from: 'bot', text: data.error, error: true, at: Date.now() }); return; }
+    const already = data.found.filter(id => !data.added.includes(id));
+    const text = !data.found.length && !data.unknown?.length ? "I couldn't spot any ingredients. Try a closer, brighter photo."
+      : [data.added.length ? `I added ${data.added.map(ingName).join(', ')} to your kitchen.` : '',
+        already.length ? `You already had ${already.map(ingName).join(', ')}.` : '',
+        data.unknown?.length ? `I also saw ${data.unknown.join(', ')} (not in Ballava's list yet).` : ''].filter(Boolean).join('\n');
+    chats.add({ from: 'bot', text, found: data.found, added: data.added, followups: data.found.length ? ['What can I cook with these?', 'Something quick with these'] : [], at: Date.now() });
+  };
 
   const last = messages[messages.length - 1];
   const chips = last?.from === 'bot' && last.followups?.length && !busy ? last.followups : starters(screen, recipe, ai);
@@ -306,11 +309,7 @@ export default function Assistant({ screen, param, onClose, ctx }) {
             <div className="chips scroll starters">{chips.map(s => <button key={s} className="chip" onClick={() => ask(s)} disabled={!!busy}>{s}</button>)}</div>
             <form className="row nowrap chat-form" onSubmit={e => { e.preventDefault(); ask(text); }}>
               <input aria-label="Your question" value={text} onChange={e => setText(e.target.value)} placeholder={recipe ? `Ask about ${recipe.name}…` : 'Ask for any recipe or food question…'} autoFocus />
-              {ai && (
-                <label className="icon-btn chat-photo" aria-label="Send a photo of your fridge or shelf" title="Photo of your fridge">📷
-                  <input type="file" accept="image/*" capture="environment" onChange={onPhoto} hidden />
-                </label>
-              )}
+              <PhotoScan compact addToPantry={ctx.addToPantry} notify={ctx.notify} onStart={photoStart} onScanned={photoDone} />
               {SpeechRec && <button type="button" className={'icon-btn mic' + (listening ? ' live' : '')} aria-label="Speak" onClick={() => { setListening(true); listenOnce(ask, () => setListening(false)); }}>🎤</button>}
               <button className="btn primary" type="submit" disabled={!!busy}>Send</button>
             </form>

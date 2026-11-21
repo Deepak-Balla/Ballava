@@ -5,7 +5,7 @@ import re
 import pytest
 from playwright.sync_api import expect
 
-from .e2e_helpers import WIDE, browser, device, errors, no_sideways_scroll, open_chef, site, snap, tab, more  # noqa: F401  (pytest fixtures)
+from .e2e_helpers import FAKE_VOICE, PHOTO, WIDE, browser, device, errors, no_sideways_scroll, open_chef, site, snap, tab, more  # noqa: F401
 
 pytestmark = pytest.mark.e2e
 
@@ -40,6 +40,66 @@ def test_leftover_rice_can_be_adjusted(page):
     row.get_by_text('1 day left').wait_for()
     row.get_by_role('button', name=re.compile('One day less')).click()
     row.get_by_text('Use today').wait_for()
+
+
+def test_photo_of_the_fridge_adds_items_in_the_kitchen_and_in_chef(page, monkeypatch):
+    from kitchen import ai
+    monkeypatch.setattr(ai, 'scan_photo', lambda image, media_type='image/jpeg': ['Tomato', 'Paneer', 'dragon fruit'])
+    tab(page, 'Kitchen')
+    page.get_by_role('button', name='Add items from a photo').click()
+    page.get_by_role('menuitem', name='📸 Take a photo').wait_for()
+    page.locator('input[aria-label="Choose a photo of your kitchen"]').set_input_files(PHOTO)
+    card = page.locator('.scan-result')
+    card.get_by_text(re.compile('Added Paneer to your kitchen')).wait_for()
+    card.get_by_text(re.compile('Already in your kitchen: Tomato')).wait_for()
+    card.get_by_text(re.compile('dragon fruit')).wait_for()
+    page.locator('.pantry-list .p-name', has_text='Paneer').wait_for()
+    snap(page, '02b-kitchen-photo')
+    card.get_by_role('button', name='Undo').click()
+    expect(page.locator('.pantry-list .p-name', has_text='Paneer')).to_have_count(0)
+
+    open_chef(page)
+    chef = page.get_by_role('dialog', name='Ballava Chef')
+    chef.get_by_role('button', name='Add items from a photo').click()
+    chef.locator('input[aria-label="Choose a photo of your kitchen"]').set_input_files(PHOTO)
+    answer = chef.locator('.bubble.bot', has_text='I added Paneer to your kitchen')
+    answer.wait_for()
+    answer.get_by_role('button', name=re.compile('Undo')).click()
+    answer.get_by_role('button', name='↩ Removed again').wait_for()
+    tab(page, 'Ballava Chef')
+    expect(page.locator('.pantry-list .p-name', has_text='Paneer')).to_have_count(0)
+
+
+def test_hands_free_cooking_by_voice(device, site):
+    p = device()
+    p.add_init_script(FAKE_VOICE)
+    p.goto(site)
+    p.get_by_role('button', name='Continue without an account').click()
+    p.get_by_role('button', name='Try with a sample kitchen').click()
+    p.goto(site + '#/recipe/dal_tadka')
+    p.get_by_role('button', name='Start cooking').click()
+    p.get_by_label(re.compile('Hands-free')).check()
+    p.locator('.voice-status.listening').wait_for()
+    p.wait_for_timeout(1400)  # let "Hands-free is on" finish
+
+    say = lambda text: p.evaluate('t => window.__say(t)', text)  # noqa: E731
+    say('next')
+    p.get_by_text('Step 2 of').wait_for()
+    assert any(s.startswith('Step 2.') for s in p.evaluate('window.__spoken')), 'the new step is read aloud: hands-free is eyes-free'
+    say('and then you can add it back into the pan')  # a long sentence (or our own voice) is not a command
+    p.wait_for_timeout(200)
+    expect(p.get_by_text('Step 2 of')).to_be_visible()
+    say('go back')
+    p.get_by_text('Step 1 of').wait_for()
+    p.wait_for_timeout(1400)
+    say('timer 2 minutes')
+    p.locator('.timer', has_text='2 min').wait_for()
+    say('whistle')
+    p.locator('.voice-heard', has_text='whistle +1').wait_for()
+    say('done')
+    p.locator('.voice-heard', has_text='not yet').wait_for()
+    snap(p, '07b-hands-free')
+    p.context.close()
 
 
 def test_home_suggests_dishes_and_flags_leftovers(page):
@@ -137,6 +197,7 @@ def test_ai_is_in_the_navigation_on_every_tab(page):
         expect(page.get_by_role('dialog', name='Ballava Chef')).to_have_count(0)
     tab(page, 'Cook')
     open_chef(page)
+    page.get_by_role('button', name='New chat').click()
     page.get_by_label('Your question').fill('How many calories in dal tadka?')
     page.get_by_role('button', name='Send').click()
     page.locator('.bubble.bot', has_text='kcal per serving').wait_for()

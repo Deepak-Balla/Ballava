@@ -1,15 +1,46 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ingredient, useSoon } from '../catalog.js';
 import { Empty, Stars, ingName } from '../ui.jsx';
-import { speak, stopSpeaking, beep, keepAwake, fmtTime, go, SpeechRec, useBrain } from '../lib.js';
+import { speak, stopSpeaking, isSpeaking, beep, keepAwake, fmtTime, go, SpeechRec, useBrain } from '../lib.js';
 import { BachaoList } from './Bachao.jsx';
+
+// What hands-free mode understands (English and common Hindi words). Returns { label, say } or null.
+export function handsFreeCommand(said, s, { whistle, finish }) {
+  const has = re => re.test(said);
+  const minutes = said.match(/(\d+)\s*(?:min|minute)/);
+  if (has(/\b(next|aage|agla|aagla|forward)\b/)) {
+    if (s.last) return { label: 'last step', say: 'That was the last step. Say done to finish.' };
+    s.goTo(s.i + 1);
+    return { label: 'next step' };
+  }
+  if (has(/\b(back|previous|peeche|pichla|pichhe)\b/)) { s.goTo(s.i - 1); return { label: 'previous step' }; }
+  if (has(/\b(repeat|again|dobara|read)\b/)) return { label: 'repeat', say: `Step ${s.i + 1}. ${s.step.text}` };
+  if (has(/\b(timer|time)\b/) || minutes) {
+    const m = minutes ? Number(minutes[1]) : s.step.minutes;
+    if (!m) return { label: 'timer?', say: 'Say how long, for example: timer 5 minutes.' };
+    s.startTimer(m, minutes ? `${m} min` : `Step ${s.i + 1}`);
+    return { label: `${m}-minute timer`, say: `Timer started for ${m} minute${m > 1 ? 's' : ''}.` };
+  }
+  if (has(/\b(whistle|whistles|seeti|siti)\b/)) {
+    whistle();
+    return { label: 'whistle +1', say: 'Whistle counted.' };
+  }
+  if (has(/\b(done|finish|finished|khatam|ho gaya)\b/)) {
+    if (!s.last) return { label: 'not yet', say: `There are ${s.steps.length - s.i - 1} more steps. Say next.` };
+    finish();
+    return { label: 'finish' };
+  }
+  if (has(/\b(stop|quiet|chup|pause)\b/)) { stopSpeaking(); return { label: 'quiet' }; }
+  if (has(/\b(help|commands)\b/)) return { label: 'help', say: 'Say next, back, repeat, timer 5 minutes, whistle, or done.' };
+  return null;
+}
 
 export default function Cook(props) {
   if (!props.recipe) return <div className="screen"><Empty title="Recipe not found"><a href="#/home">Go home</a></Empty></div>;
   return <CookMode key={props.recipe.id} {...props} />;
 }
 
-function CookMode({ recipe, pantry, setPantry, logMeal, addToPantry, notify, family }) {
+function CookMode({ recipe, pantry, setPantry, logMeal, addToPantry, notify, family, openAssistant }) {
   const [i, setI] = useState(0);
   const [timers, setTimers] = useState([]); // {id, label, endsAt, done}
   const [now, setNow] = useState(Date.now());
@@ -41,29 +72,62 @@ function CookMode({ recipe, pantry, setPantry, logMeal, addToPantry, notify, fam
   const last = i === steps.length - 1;
 
   const startTimer = (minutes, label) => setTimers(ts => [...ts, { id: Date.now(), label, endsAt: Date.now() + minutes * 60000, done: false }]);
-  const goTo = n => { const k = Math.max(0, Math.min(steps.length - 1, n)); setI(k); if (readAloud) speak(`Step ${k + 1}. ${steps[k].text}`); };
-  stateRef.current = { i, goTo, step, startTimer, last };
+  // Hands-free means eyes-free too: moving to a step always reads it out.
+  const goTo = n => { const k = Math.max(0, Math.min(steps.length - 1, n)); setI(k); if (readAloud || handsFree) speak(`Step ${k + 1}. ${steps[k].text}`); };
+  stateRef.current = { i, goTo, step, startTimer, last, steps };
 
   useEffect(() => { if (readAloud) speak(`Step ${i + 1}. ${step.text}`); else stopSpeaking(); }, [readAloud]);
 
-  // Hands-free: say "next", "back", "repeat" or "start timer".
+  // Hands-free: voice commands while your hands are busy. See handsFreeCommand() below for what it understands.
+  const [voice, setVoice] = useState({ state: 'off', heard: '' }); // off | starting | listening | error
   useEffect(() => {
-    if (!handsFree || !SpeechRec) return;
-    let stopped = false;
-    const rec = new SpeechRec();
-    rec.lang = 'en-IN'; rec.continuous = true; rec.interimResults = false;
-    rec.onresult = e => {
-      const said = e.results[e.results.length - 1][0].transcript.toLowerCase();
+    if (!handsFree || !SpeechRec) { setVoice({ state: 'off', heard: '' }); return undefined; }
+    let stopped = false, rec = null, retry = null, failures = 0;
+    const act = said => {
       const s = stateRef.current;
-      if (/\b(next|aage|agla)\b/.test(said)) s.goTo(s.i + 1);
-      else if (/\b(back|previous|peeche|pichla)\b/.test(said)) s.goTo(s.i - 1);
-      else if (/\b(repeat|again|dobara)\b/.test(said)) speak(`Step ${s.i + 1}. ${s.step.text}`);
-      else if (/timer/.test(said) && s.step.minutes) { s.startTimer(s.step.minutes, `Step ${s.i + 1}`); speak(`Timer started for ${s.step.minutes} minutes`); }
+      const reply = handsFreeCommand(said, s, {
+        whistle: () => setWhistles(w => { const n = (w[s.i] || 0) + 1; return { ...w, [s.i]: n }; }),
+        finish: () => { stopSpeaking(); setFinishing(true); },
+      });
+      if (reply) {
+        setVoice(v => ({ ...v, heard: `${said} → ${reply.label}` }));
+        if (reply.say) speak(reply.say);
+      } else setVoice(v => ({ ...v, heard: `${said} → ?` }));
     };
-    rec.onend = () => { if (!stopped) { try { rec.start(); } catch { /* */ } } };
-    try { rec.start(); } catch { /* */ }
-    recRef.current = rec;
-    return () => { stopped = true; try { rec.stop(); } catch { /* */ } };
+    const begin = () => {
+      if (stopped) return;
+      rec = new SpeechRec(); // a fresh recogniser each time is more reliable, especially on Android
+      rec.lang = 'en-IN'; rec.continuous = true; rec.interimResults = false; rec.maxAlternatives = 3;
+      rec.onstart = () => { failures = 0; setVoice(v => ({ ...v, state: 'listening' })); };
+      rec.onresult = e => {
+        for (let k = e.resultIndex ?? 0; k < e.results.length; k++) {
+          const result = e.results[k];
+          if (result.isFinal === false) continue;
+          const said = String(result[0]?.transcript || '').trim().toLowerCase();
+          const words = said.split(/\s+/).length;
+          // Commands are a few words; long sentences are talk (or our own read-aloud voice). While we're reading a
+          // step aloud, only a short, clear command ("next", "stop") counts, and it interrupts the reading.
+          if (!said || words > 6 || (isSpeaking() && words > 2)) continue;
+          if (isSpeaking()) stopSpeaking();
+          act(said);
+        }
+      };
+      rec.onerror = ev => {
+        if (['not-allowed', 'service-not-allowed', 'audio-capture'].includes(ev.error)) {
+          stopped = true;
+          setVoice({ state: 'error', heard: '' });
+          notify(ev.error === 'audio-capture' ? 'No microphone found for hands-free mode.'
+            : 'Hands-free needs the microphone. Allow it in your browser (and open Ballava on https or localhost).');
+          setHandsFree(false);
+        }
+      };
+      // Browsers stop listening after a pause or a network hiccup: start again, gently.
+      rec.onend = () => { if (!stopped) { failures += 1; retry = setTimeout(begin, Math.min(5000, 300 * failures)); } };
+      try { setVoice(v => ({ ...v, state: 'starting' })); rec.start(); } catch { retry = setTimeout(begin, 1000); }
+    };
+    begin();
+    speak('Hands-free is on. Say next, back, repeat, timer, or whistle.');
+    return () => { stopped = true; clearTimeout(retry); try { rec && rec.abort(); } catch { /* */ } };
   }, [handsFree]);
 
   // Whistle listening (beta): counts loud, high-pitched sounds lasting over half a second.
@@ -123,6 +187,7 @@ function CookMode({ recipe, pantry, setPantry, logMeal, addToPantry, notify, fam
       <div className="cook-top">
         <button className="icon-btn" onClick={() => go('recipe/' + recipe.id)} aria-label="Exit cook mode">✕</button>
         <div className="cook-title">{recipe.name}</div>
+        {openAssistant && <button className="btn sm" onClick={openAssistant} aria-label="Ask Ballava Chef">🧑‍🍳 Chef</button>}
         <button className="btn bachao sm" onClick={() => setShowBachao(true)}>🛟 Bachao!</button>
       </div>
       <div className="progress" aria-label={`Step ${i + 1} of ${steps.length}`}><div style={{ width: `${((i + 1) / steps.length) * 100}%` }} /></div>
@@ -161,7 +226,16 @@ function CookMode({ recipe, pantry, setPantry, logMeal, addToPantry, notify, fam
 
       <div className="cook-tools">
         <label className="switch"><input type="checkbox" checked={readAloud} onChange={e => setReadAloud(e.target.checked)} /> 🔊 Read steps aloud</label>
-        {SpeechRec && <label className="switch"><input type="checkbox" checked={handsFree} onChange={e => setHandsFree(e.target.checked)} /> 🎤 Hands-free ("next", "back", "repeat", "timer")</label>}
+        {SpeechRec
+          ? <label className="switch"><input type="checkbox" checked={handsFree} onChange={e => setHandsFree(e.target.checked)} /> 🎤 Hands-free: say "next", "back", "repeat", "timer 5 minutes", "whistle", "done"</label>
+          : <p className="muted small">Hands-free needs Chrome or Edge (voice commands aren't available in this browser).</p>}
+        {handsFree && (
+          <div className={'voice-status ' + voice.state} role="status" aria-live="polite">
+            <span className="voice-dot" aria-hidden="true" />
+            {voice.state === 'listening' ? 'Listening…' : voice.state === 'starting' ? 'Starting the microphone…' : 'Microphone off'}
+            {voice.heard && <span className="voice-heard">Heard: “{voice.heard}”</span>}
+          </div>
+        )}
       </div>
 
       <div className="cook-nav">

@@ -151,5 +151,7 @@ ANTHROPIC_MODEL = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-5-5')
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash-lite')
 AI_RATE_LIMIT = int(os.environ.get('AI_RATE_LIMIT', '10'))
 SIGNUP_RATE_LIMIT = int(os.environ.get('SIGNUP_RATE_LIMIT', '20'))
+# How long Ballava keeps what people do (see kitchen/retention.py). 180 days = 6 months. 0 keeps everything.
+DATA_RETENTION_DAYS = int(os.environ.get('DATA_RETENTION_DAYS', '180'))
 # Phone sign-in: OTP_DEV_MODE=1 shows the code on screen (your own computer only), or set the TWILIO_* values.
 OTP_DEV_MODE = env_flag('OTP_DEV_MODE') and DEBUG
