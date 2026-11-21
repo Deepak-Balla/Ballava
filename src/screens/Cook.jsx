@@ -40,12 +40,13 @@ export default function Cook(props) {
   return <CookMode key={props.recipe.id} {...props} />;
 }
 
-function CookMode({ recipe, pantry, setPantry, logMeal, addToPantry, notify, family, openAssistant }) {
+function CookMode({ recipe, pantry, setPantry, logMeal, addToPantry, notify, family, openAssistant, prefs = {} }) {
   const [i, setI] = useState(0);
   const [timers, setTimers] = useState([]); // {id, label, endsAt, done}
   const [now, setNow] = useState(Date.now());
-  const [readAloud, setReadAloud] = useState(false);
-  const [handsFree, setHandsFree] = useState(false);
+  // Settings → Cooking can switch these on every time you start cooking.
+  const [readAloud, setReadAloud] = useState(!!prefs.readAloud);
+  const [handsFree, setHandsFree] = useState(!!prefs.handsFree && !!SpeechRec);
   const [whistles, setWhistles] = useState({}); // step index -> count
   const [listenWhistle, setListenWhistle] = useState(false);
   const [showBachao, setShowBachao] = useState(false);

@@ -103,8 +103,11 @@ the reply, and put their ids in "dishes" (at most 4). Only use ids from the reci
 When they ask for a new or different dish that is not in the recipe book, put one full new recipe in "recipe". {RECIPE_RULES}
 When the user wants to buy something, or you suggest buying a few items, put the ingredient names in "shopping".
 In "followups", suggest 2 or 3 short next questions they might tap (under 6 words each).
+Only when the context says THE USER ASKED TO PLAN a day, put the final day plan in "plan" as recipe-book ids:
+{{"breakfast": "id", "lunch": "id", "dinner": "id"}} (keep the drafted ids for meals you don't change). Every dish you
+name for a meal in "reply" must be the one in "plan".
 Reply with ONLY a JSON object, no other text:
-{{"reply": "your answer", "dishes": ["recipe_id", ...], "recipe": null, "shopping": [], "followups": []}}
+{{"reply": "your answer", "dishes": ["recipe_id", ...], "recipe": null, "shopping": [], "followups": [], "plan": null}}
 where "recipe", when you include one, has this shape:
 {RECIPE_SHAPE}"""
 

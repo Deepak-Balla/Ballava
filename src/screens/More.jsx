@@ -5,6 +5,7 @@ import { t, LANGS } from '../i18n.js';
 
 export default function More({ prefs, setPrefs, auth, members, savedDishes }) {
   const links = [
+    ['settings', '⚙️', t('Settings'), 'Theme, colour, text size, voice, Chef and more'],
     ['saved', '❤️', 'Saved dishes', savedDishes.length ? `${savedDishes.length} saved` : 'Tap ♡ on any dish to keep it here'],
     ['family', '👪', t('Family'), members.length ? `${members.length} added` : 'Diets, allergies and goals'],
     ['bachao', '🛟', 'Bachao!', 'Rescue a dish that went wrong'],

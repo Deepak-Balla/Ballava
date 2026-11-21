@@ -1,6 +1,6 @@
 // Ballava service worker: lets the app open even with no internet.
-const CACHE = 'ballava-mwqaf18j';
-const SHELL = ['./', 'index.html', 'app.js?v=mwqaf18j', 'app.css?v=mwqaf18j', 'manifest.webmanifest', 'icon.svg', 'icon-192.png'];
+const CACHE = 'ballava-mwqc3okt';
+const SHELL = ['./', 'index.html', 'app.js?v=mwqc3okt', 'app.css?v=mwqc3okt', 'manifest.webmanifest', 'icon.svg', 'icon-192.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

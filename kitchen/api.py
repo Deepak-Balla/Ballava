@@ -318,9 +318,14 @@ def clean_message(m):
         return None
     out = {k: str(m[k])[:n] for k, n in MESSAGE_TEXT.items() if m.get(k) not in (None, '')}
     out.update({k: [str(x)[:n] for x in m[k][:15]] for k, n in MESSAGE_LISTS.items() if isinstance(m.get(k), list) and m[k]})
-    for k in ('error', 'done', 'undone'):
+    for k in ('error', 'done', 'undone', 'planned'):
         if m.get(k) is True:
             out[k] = True
+    plan = m.get('plan')
+    if isinstance(plan, dict) and isinstance(plan.get('days'), dict):  # a plan Chef made: dates and dish ids only
+        out['plan'] = {'kind': 'week' if plan.get('kind') == 'week' else 'day',
+                       'days': {str(d)[:10]: {s: str(v)[:60] for s, v in day.items() if s in planner.SLOTS and isinstance(v, str)}
+                                for d, day in list(plan['days'].items())[:7] if isinstance(day, dict)}}
     if isinstance(m.get('at'), (int, float)):
         out['at'] = int(m['at'])
     return out
@@ -510,9 +515,10 @@ def plan_week(request, body):
     return {'plan': plan}
 
 
-@endpoint(limit=STATE)
-def swap(request, body):
-    """Pick a different dish for one meal, avoiding everything else planned that week."""
+def slot_options(body):
+    """Dishes that could replace one planned meal, best first. Never anything else planned that week, and never
+    a dish already tried for this meal (`exclude`), so swapping keeps finding new ideas instead of bouncing
+    between the same two (dosa, idli, dosa...)."""
     ctx = context(body)
     plan, date, slot = _dict(body.get('plan')), str(body.get('date') or ''), body.get('slot')
     if slot not in planner.SLOTS:
@@ -520,11 +526,30 @@ def swap(request, body):
     start = str(body.get('start') or date)
     days = [planner.add_days(start, i) for i in range(7)]
     week = {i for d in days for i in planner.day_recipe_ids(plan.get(d))}
+    tried = {str(x) for x in _list(body.get('exclude'))}
     day_log = ctx['log'] + [{'recipeId': plan[d][s], 'date': d, 'slot': s} for d in days for s in planner.SLOTS
                             if (plan.get(d) or {}).get(s) and not (d == date and s == slot)]
     rows = planner.recommend(**{**ctx, 'log': day_log}, slot=slot, date=date, fasting_applies=False)
-    pick = next((r for r in rows if r['recipe']['id'] not in week), None)
-    return {'recipeId': pick['recipe']['id'] if pick else None}
+    return [r for r in rows if r['recipe']['id'] not in week and r['recipe']['id'] not in tried]
+
+
+@endpoint(limit=STATE)
+def swap(request, body):
+    """Pick a different dish for one meal: the best one not planned this week and not tried already."""
+    rows = slot_options(body)
+    return {'recipeId': rows[0]['recipe']['id'] if rows else None}
+
+
+@endpoint(limit=STATE)
+def alternatives(request, body):
+    """A page of ideas for one planned meal, with why each one fits and what it needs."""
+    try:
+        limit = max(1, min(12, int(body.get('limit') or 6)))
+    except (TypeError, ValueError):
+        limit = 6
+    rows = slot_options(body)
+    return {'options': [{'id': r['recipe']['id'], 'why': r['why'][:2], 'missing': [engine.name_of(o[0]) for o in r['majorMissing']]}
+                        for r in rows[:limit]], 'more': len(rows) > limit}
 
 
 @endpoint(limit=STATE)
@@ -655,8 +680,18 @@ def ai_chat(request, body):
     ctx = context(body)
     current = planner.lookup(str(body.get('recipeId') or ''), ctx['extra']) if body.get('recipeId') else None
     named = planner.mentioned_recipe(question.lower(), ctx['extra_recipes'], ctx['hidden'])  # "how do I make dal tadka?"
+    # "Plan my day" / "plan my week": make a real plan (the Plan tab's rules), which the phone can add with one tap.
+    made = planner.chat_plan(question, plan=_dict(body.get('plan')), festivals=catalog.festivals(),
+                             observed=_list(body.get('observed')), **ctx)
+    if made:
+        named = None
+    today = planner.day_key(None, ctx['tz'])
 
     def built_in(note=None):
+        if made:
+            head = 'Here is your week, with no repeats' if made['kind'] == 'week' else "Here's a plan"
+            reply = f"{head}:\n{planner.plan_summary(made, ctx['extra'], today)}\nTap “Add to my plan” to use it."
+            return {'reply': reply, 'dishes': [], 'recipe': None, 'shopping': [], 'plan': made, 'source': 'builtin', 'note': note}
         r = planner.assistant_reply(question, plan=_dict(body.get('plan')), current=current, **ctx)
         return {'reply': r['reply'], 'dishes': r.get('dishes', []), 'recipe': None, 'shopping': [], 'source': 'builtin', 'note': note}
 
@@ -669,11 +704,11 @@ def ai_chat(request, body):
     history = [('assistant' if m.get('from') == 'bot' else 'user', str(m.get('text') or '')[:1500])
                for m in _list(body.get('messages'))[-8:] if isinstance(m, dict) and m.get('text')]
     try:
-        data = ai.chat(question, assistant.context_text(ctx, body, current, named=named), history)
+        data = ai.chat(question, assistant.context_text(ctx, body, current, named=named, made=made), history)
     except ApiError as err:
         log.warning('AI chat fell back to the built-in answers: %s', err.message)
         return built_in(err.message)
-    return assistant.clean_reply(data, ctx, current, question=question, named=named)
+    return assistant.clean_reply(data, ctx, current, question=question, named=named, made=made)
 
 
 @endpoint(limit=PHOTO)

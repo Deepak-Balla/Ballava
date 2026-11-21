@@ -45,13 +45,15 @@ export function listenOnce(onText, onEnd) {
 // ---- Read aloud (text to speech).
 // Hands-free mode must not hear the app's own voice as a command, so we remember when we last spoke.
 let speakingUntil = 0;
+let voiceRate = 0.95; // Settings → Cooking → Voice speed
+export const setVoiceRate = rate => { voiceRate = Number(rate) || 0.95; };
 export function speak(text) {
   try {
     if (!('speechSynthesis' in window)) return;
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'en-IN';
-    u.rate = 0.95;
+    u.rate = voiceRate;
     speakingUntil = Date.now() + 60000; // until it finishes (or a minute, if the browser never says)
     u.onend = u.onerror = () => { speakingUntil = Date.now() + 1200; }; // the tail of our voice can still arrive
     speechSynthesis.speak(u);

@@ -5,7 +5,7 @@
 // private to you, so your chats survive signing out and follow you to your other devices.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, go, listenOnce, SpeechRec, speak, stopSpeaking } from './lib.js';
-import { ingName, missingFor, lineName, slotFor, dayKey, addDays, SLOT_LABEL } from './catalog.js';
+import { ingName, missingFor, lineName, slotFor, dayKey, addDays, SLOTS, SLOT_LABEL } from './catalog.js';
 import PhotoScan from './PhotoScan.jsx';
 
 const hello = name => ({ from: 'bot', text: `Hi${name ? ' ' + name : ''}! I'm Ballava Chef 🧑‍🍳 Ask me for any recipe by name, what to cook with what you have, calories, swaps, tiffin ideas, or how to fix a dish.` });
@@ -118,10 +118,10 @@ const ago = t => {
 function starters(screen, recipe, ai) {
   if (recipe) return [`Calories in ${recipe.name}?`, 'Make it healthier', 'Make it kid-friendly', 'What can I use instead?'];
   const by = {
-    home: ['What should I cook now?', ai && 'Give me the chicken biryani recipe', 'Quick 15-minute dinner', 'Healthy breakfast ideas'],
+    home: ['What should I cook now?', 'Plan my day', ai && 'Give me the chicken biryani recipe', 'Quick 15-minute dinner'],
+    dashboard: ['Plan my day', 'Plan my week', 'Was our week balanced?', 'Light dinner ideas'],
     pantry: ['What can I cook with what I have?', 'What should I use up first?', 'How do I store coriander longer?'],
-    plan: ["What's planned for tomorrow?", 'What should I prep tonight?', 'Tiffin ideas', 'High protein dinner ideas'],
-    dashboard: ['Was our week balanced?', 'How can we eat fewer calories?', 'Light dinner ideas'],
+    plan: ["What's planned for tomorrow?", 'Plan my day', 'Plan my week', 'What should I prep tonight?', 'Tiffin ideas'],
     track: ['Was our week balanced?', 'Ideas for more vegetables', 'Light dinner ideas'],
     list: ['Cheap protein ideas', 'What else should I buy this week?'],
     saved: ['Which saved dish should I make today?', 'Something new like my saved dishes'],
@@ -162,12 +162,65 @@ function DishCard({ recipe, ctx, close, isNew }) {
   );
 }
 
+const planDate = (date, today) => (date === today ? 'Today' : date === addDays(today, 1) ? 'Tomorrow'
+  : new Date(date + 'T12:00:00').toLocaleDateString('en', { weekday: 'short', day: 'numeric' }));
+
+// A plan Chef made ("plan my day" / "plan my week"): every meal, the calories, and one tap to put it in the Plan.
+function PlanCard({ m, i, ctx, close, update }) {
+  const { findRecipe, setPlan, notify } = ctx;
+  const today = dayKey();
+  const days = Object.entries(m.plan.days);
+  function apply() {
+    setPlan(p => {
+      const next = { ...p };
+      for (const [date, day] of days) {
+        const old = p[date] || {};
+        const locked = old.locked || [];
+        const merged = { ...old };
+        for (const s of SLOTS) if (day[s] && !locked.includes(s)) merged[s] = day[s]; // your locked meals stay
+        if (day.tiffins && Object.keys(day.tiffins).length) merged.tiffins = day.tiffins;
+        if (day.fast && Object.keys(day.fast).length) merged.fast = day.fast;
+        if (day.festival) merged.festival = day.festival;
+        next[date] = merged;
+      }
+      return next;
+    });
+    update(i, { planned: true });
+    notify(m.plan.kind === 'week' ? 'Your week is in the plan.' : `${planDate(days[0][0], today)}'s meals are in your plan.`);
+  }
+  return (
+    <div className="chat-plan">
+      <b>📅 {m.plan.kind === 'week' ? 'Your week' : `${planDate(days[0][0], today)}'s plan`}</b>
+      {days.map(([date, day]) => {
+        const meals = SLOTS.map(s => [s, day[s] && findRecipe(day[s])]).filter(([, r]) => r);
+        const kcal = meals.reduce((n, [, r]) => n + (r.nutrition?.kcal || 0), 0);
+        return (
+          <div key={date} className="chat-plan-day">
+            {m.plan.kind === 'week' && <span className="chat-plan-date">{planDate(date, today)}</span>}
+            {meals.map(([s, r]) => (
+              <button key={s} className="chat-plan-row" onClick={() => { go('recipe/' + r.id); close?.(); }}>
+                <span className="muted small">{SLOT_LABEL[s]}</span><span>{r.name}</span>{r.nutrition?.kcal != null && <small className="muted">{r.nutrition.kcal} kcal</small>}
+              </button>
+            ))}
+            {kcal > 0 && <span className="muted small chat-plan-total">≈ {kcal} kcal for the day, one serving each</span>}
+          </div>
+        );
+      })}
+      <div className="chat-dish-actions">
+        <button className="btn primary sm" disabled={m.planned} onClick={apply}>{m.planned ? '✓ In your plan' : '📅 Add to my plan'}</button>
+        <button className="btn sm" onClick={() => { go('plan'); close?.(); }}>Open Plan</button>
+      </div>
+    </div>
+  );
+}
+
 function BotExtras({ m, i, ctx, close, update }) {
   const { findRecipe, addToShopping, addToPantry, notify } = ctx;
   const recipe = m.recipeId && findRecipe(m.recipeId);
   const dishes = (m.dishes || []).map(findRecipe).filter(Boolean);
   return (
     <>
+      {m.plan?.days && <PlanCard m={m} i={i} ctx={ctx} close={close} update={update} />}
       {recipe && <DishCard recipe={{ ...recipe, warning: m.warning || recipe.warning }} ctx={ctx} close={close} isNew />}
       {dishes.slice(0, 3).map(r => <DishCard key={r.id} recipe={r} ctx={ctx} close={close} />)}
       {dishes.length > 3 && (
@@ -225,10 +278,12 @@ export default function Assistant({ screen, param, onClose, ctx }) {
     try {
       const data = await api('ai/chat', {
         ...family, history: family.history.slice(-60), plan, savedDishes, text: q, messages: before, screen, recipeId: recipe?.id,
+        observed: prefs?.observed || [], chefStyle: { length: prefs?.chefLength, language: prefs?.chefLanguage },
       });
       if (data.recipe) setAiRecipes(r => ({ ...r, [data.recipe.id]: data.recipe }));
       chats.add({ from: 'bot', text: data.reply, dishes: data.dishes || [], recipeId: data.recipe?.id, warning: data.recipe?.warning,
-        shopping: data.shopping || [], followups: data.followups || [], source: data.source, note: data.note, at: Date.now() });
+        shopping: data.shopping || [], followups: data.followups || [], plan: data.plan || undefined,
+        source: data.source, note: data.note, at: Date.now() });
     } catch (err) {
       chats.add({ from: 'bot', text: err.message, error: true, at: Date.now() });
     }

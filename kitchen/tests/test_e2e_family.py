@@ -110,6 +110,16 @@ def test_swap_lock_and_refresh_keeps_it(page):
     day = page.locator('.plan-day').first
     before = day.locator('.plan-dish').nth(2).inner_text()
     day.get_by_role('button', name='Swap Dinner').click()
+    picker = page.get_by_role('dialog', name=re.compile('Change Dinner'))
+    picker.locator('.swap-option').first.wait_for()
+    first_ideas = picker.locator('.swap-option').all_inner_texts()
+    assert len(first_ideas) >= 3, first_ideas
+    picker.get_by_role('button', name='🔁 Show other ideas').click()
+    expect(picker.locator('.swap-option').first).not_to_have_text(first_ideas[0])  # new ideas, never the same two again
+    second = [t.split('\n')[0] for t in picker.locator('.swap-option').all_inner_texts()]
+    assert not set(second) & {t.split('\n')[0] for t in first_ideas}, (first_ideas, second)
+    snap(page, '22b-swap-picker')
+    picker.locator('.swap-option').first.click()
     expect(day.locator('.plan-dish').nth(2)).not_to_have_text(before)
     swapped = day.locator('.plan-dish').nth(2).inner_text()
     expect(day.get_by_role('button', name='Unlock Dinner')).to_have_count(1)

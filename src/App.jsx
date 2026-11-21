@@ -18,7 +18,9 @@ import Account from './screens/Account.jsx';
 import Login from './screens/Login.jsx';
 import Vote from './screens/Vote.jsx';
 import Saved from './screens/Saved.jsx';
+import Settings from './screens/Settings.jsx';
 import Assistant from './Assistant.jsx';
+import { applyLook } from './look.js';
 
 const isGuest = () => { try { return localStorage.getItem('ballava.guest') === '1'; } catch { return false; } };
 
@@ -43,6 +45,10 @@ export default function App() {
   const [guest, setGuest] = useState(isGuest);
 
   setLang(prefs.lang);
+  // Settings → Look (theme, colour, text size...), applied to the whole page, even before signing in.
+  useEffect(() => { applyLook(prefs); }, [prefs.theme, prefs.accent, prefs.textSize, prefs.reduceMotion, prefs.showCalories, prefs.voiceRate]);
+  // Settings → Open the app on: only when the app opens without a page in the address.
+  useEffect(() => { if (!location.hash && prefs.startPage && prefs.startPage !== 'dashboard') go(prefs.startPage); }, []);
 
   const notify = useCallback((msg) => {
     setToast(msg);
@@ -213,6 +219,7 @@ export default function App() {
     case 'dashboard': case 'track': body = <Dashboard {...ctx} view={screen === 'track' ? 'diary' : 'overview'} />; break;
     case 'more': body = <More {...ctx} />; break;
     case 'saved': body = <Saved {...ctx} />; break;
+    case 'settings': body = <Settings {...ctx} />; break;
     case 'account': body = <Account {...ctx} />; break;
     default: body = <Home {...ctx} />; // also #/ask, the old chat address: Home with the AI window open
   }
@@ -223,7 +230,7 @@ export default function App() {
     ['dashboard', 'Dashboard', '📊'], ['home', 'Cook', '🍳'], ['plan', 'Plan', '🗓️'], ['chef', 'Chef', '🧑‍🍳'], ['pantry', 'Kitchen', '🧺'],
     ['list', 'List', '🛒'], ['more', 'More', '☰'],
   ];
-  const moreScreens = ['more', 'family', 'bachao', 'account', 'saved'];
+  const moreScreens = ['more', 'family', 'bachao', 'account', 'saved', 'settings'];
   const active = id => (id === 'more' ? moreScreens.includes(screen)
     : id === 'dashboard' ? ['dashboard', 'track'].includes(screen)
       : screen === id || (id === 'home' && !['plan', 'track', 'dashboard', 'pantry', 'list', ...moreScreens].includes(screen)));

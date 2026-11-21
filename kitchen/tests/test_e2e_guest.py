@@ -264,6 +264,48 @@ def test_the_app_opens_on_the_dashboard(page):
     expect(page.get_by_role('navigation', name='Main').get_by_role('button', name='Dashboard', exact=True)).to_have_class(re.compile('active'))
 
 
+def test_chef_plans_my_day_into_the_plan(page):
+    tab(page, 'Dashboard')
+    open_chef(page)
+    chef = page.get_by_role('dialog', name='Ballava Chef')
+    chef.get_by_role('button', name='New chat').click()
+    chef.get_by_role('button', name='Plan my day', exact=True).click()
+    card = chef.locator('.chat-plan')
+    card.wait_for()
+    dishes = card.locator('.chat-plan-row span:nth-child(2)').all_inner_texts()
+    assert len(dishes) == 3, dishes
+    card.get_by_role('button', name='📅 Add to my plan').click()
+    card.get_by_role('button', name='✓ In your plan').wait_for()
+    snap(page, '13-chef-plan')
+    card.get_by_role('button', name='Open Plan').click()
+    today = page.locator('.plan-day').first
+    for name in dishes:
+        today.locator('.plan-dish', has_text=name).wait_for()
+
+
+def test_settings_change_the_look_and_stay(page):
+    more(page, 'Settings')
+    page.get_by_role('button', name='🌙 Dark').click()
+    assert page.evaluate('document.documentElement.dataset.theme') == 'dark'
+    assert page.evaluate('getComputedStyle(document.body).backgroundColor') == 'rgb(22, 18, 15)'
+    page.get_by_role('button', name='Curry leaf').click()
+    page.get_by_role('button', name='Large', exact=True).click()
+    assert page.evaluate('getComputedStyle(document.documentElement).fontSize') == '17.92px'
+    page.get_by_label('Show calories').uncheck()
+    snap(page, '14-settings-dark')
+    tab(page, 'Cook')
+    page.locator('.dish-card').first.wait_for()
+    expect(page.locator('.dish-card .kcal').first).to_be_hidden()
+    snap(page, '15-cook-dark-green')
+    page.reload()
+    page.locator('.dish-card, .dash-hello').first.wait_for()
+    assert page.evaluate('[document.documentElement.dataset.theme, document.documentElement.dataset.accent]') == ['dark', 'leaf'], 'kept'
+    more(page, 'Settings')
+    page.get_by_role('button', name='Reset settings').click()
+    assert page.evaluate('document.documentElement.dataset.theme') == 'system'
+    expect(page.get_by_label('Show calories')).to_be_checked()
+
+
 def test_dashboard_shows_calories_and_meals(page):
     tab(page, 'Dashboard')
     page.locator('.goal-ring').wait_for()

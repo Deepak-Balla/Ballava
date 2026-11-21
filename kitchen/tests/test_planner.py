@@ -286,6 +286,18 @@ def test_dishes_are_recognised_by_their_everyday_names():
     assert mentioned_recipe('i have curd and rice') is None, 'ingredients are not dish names'
 
 
+def test_plan_requests_are_told_apart_from_questions():
+    from kitchen.planner import plan_request
+    today, tomorrow = MONDAY, add_days(MONDAY, 1)
+    asks = lambda q: plan_request(q, now=NOW)  # noqa: E731
+    assert asks('Plan my day') == {'kind': 'day', 'date': today}
+    assert asks('make a menu for tomorrow') == {'kind': 'day', 'date': tomorrow}
+    assert asks('Plan my week') == {'kind': 'week', 'date': today}
+    assert asks('aaj ka plan banao') == {'kind': 'day', 'date': today}
+    for q in ["What's planned for tomorrow?", 'show me the plan', "what's on the menu today", 'How do I make dal tadka?', 'plan']:
+        assert asks(q) is None, q
+
+
 def test_names_dish():
     from kitchen.engine import names_dish
     assert names_dish('give me chicken biryani', 'Chicken Biryani')

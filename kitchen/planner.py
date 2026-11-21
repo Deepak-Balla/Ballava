@@ -381,6 +381,46 @@ def plan_week(start=None, days=7, existing=None, log=(), festivals=(), observed=
     return plan
 
 
+PLAN_ASK = re.compile(r'\b(plan|planner|menu)\b')
+PLAN_FOR = re.compile(r'\b(day|today|todays|tomorrow|tomorrows|week|weekly|meals?|breakfast|lunch|dinner|aaj|kal)\b')
+NOT_A_PLAN_REQUEST = re.compile(r"\bplanned\b|what'?s (on |in )?(the |my |our )?(plan|menu)|what is (on |in )?(the |my |our )?(plan|menu)|show (me )?(the |my )?(plan|menu)")
+
+
+def plan_request(text, now=None, tz=INDIA):
+    """'Plan my day' / 'make a menu for tomorrow' / 'plan my week' -> {'kind': 'day'|'week', 'date': 'YYYY-MM-DD'}.
+    Questions about the existing plan ("what's planned for tomorrow?") are not requests to plan."""
+    q = str(text or '').lower()
+    if not PLAN_ASK.search(q) or not PLAN_FOR.search(q) or NOT_A_PLAN_REQUEST.search(q):
+        return None
+    today = day_key(now, tz)
+    if re.search(r'\bweek', q):
+        return {'kind': 'week', 'date': today}
+    return {'kind': 'day', 'date': add_days(today, 1) if re.search(r'\b(tomorrow|tomorrows|kal)\b', q) else today}
+
+
+def chat_plan(text, plan=None, now=None, festivals=(), observed=(), **ctx):
+    """When someone asks Chef to plan, make the plan the same way the Plan tab does (no repeats, family rules,
+    what's in the kitchen, locked meals kept): {'kind', 'days': {date: {breakfast, lunch, dinner, ...}}} or None."""
+    req = plan_request(text, now, ctx.get('tz', INDIA))
+    if not req:
+        return None
+    days = 7 if req['kind'] == 'week' else 1
+    made = plan_week(start=req['date'], days=days, existing=plan or {}, festivals=festivals, observed=observed, **ctx)
+    return {'kind': req['kind'], 'days': made}
+
+
+def plan_summary(made, extra=None, today=None):
+    """Plain-text plan, for the built-in answer and for the AI to talk about."""
+    lines = []
+    for date, day in made['days'].items():
+        meals = [(s, lookup(day.get(s), extra)) for s in SLOTS]
+        meals = [(s, r) for s, r in meals if r]
+        kcal = sum((r.get('nutrition') or {}).get('kcal') or 0 for _, r in meals)
+        head = 'Today' if date == today else 'Tomorrow' if today and date == add_days(today, 1) else WEEKDAYS[weekday_of(date)] + ' ' + date[8:]
+        lines.append(f"{head}: " + ', '.join(f"{SLOT_LABEL[s].lower()} {r['name']}" for s, r in meals) + (f" (about {kcal} kcal)" if kcal else ''))
+    return '\n'.join(lines)
+
+
 def day_recipe_ids(day=None):
     day = day or {}
     return [i for i in [*(day.get(s) for s in SLOTS), *(day.get('tiffins') or {}).values(), *(day.get('fast') or {}).values()] if i]

@@ -78,7 +78,7 @@ Then open **http://localhost:8000** (the app) or **http://localhost:8000/admin**
 
 > **Tip:** you can "activate" the environment once with `.venv\Scripts\Activate.ps1`, and then just type `python manage.py runserver`. If PowerShell refuses with a "running scripts is disabled" error, keep using the full `.venv\Scripts\python` form shown above.
 
-**Use it on your phone (same Wi-Fi):** run `.venv\Scripts\python manage.py runserver 0.0.0.0:8000`, find your computer's address with `ipconfig` ("IPv4 Address", like `192.168.1.5`), and open `http://192.168.1.5:8000` on your phone. Voice features and "Add to Home screen" need **https**, so they fully work once the app is online.
+**Use it on your phone:** see [Use Ballava on your phone](#use-ballava-on-your-phone) below.
 
 **First time in the app:** create an account (or tap **Continue without an account**), then tap **Try with a sample kitchen**.
 
@@ -114,14 +114,14 @@ After 5 wrong admin passwords, that login is locked for 15 minutes.
 .venv\Scripts\python -m pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest
 ```
-This runs **190 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `190 passed`. The tests never call a real AI or use your keys.
+This runs **197 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `197 passed`. The tests never call a real AI or use your keys.
 
 **Real-browser checks (about a minute):**
 ```
 .venv\Scripts\python -m playwright install chromium
 .venv\Scripts\python -m pytest -m e2e
 ```
-This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, vote, and publish a recipe as an admin. It also tries hands-free cooking with a pretend microphone, a fridge photo with a pretend AI, and the computer layout. Screenshots go to `test-screenshots/`. You should see `48 passed`.
+This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, vote, and publish a recipe as an admin. It also tries hands-free cooking with a pretend microphone, a fridge photo with a pretend AI, planning a day with Chef, changing a planned meal, the settings (dark theme, colour, text size) and the computer layout. Screenshots go to `test-screenshots/`. You should see `50 passed`.
 
 > The tests switch AI **off** on purpose (so they never use your key or your free limit). That's why the test screenshots say "AI is off"; your own app is not affected.
 
@@ -195,9 +195,41 @@ Good to know:
 - Each family can make at most 10 AI requests per minute (`AI_RATE_LIMIT`).
 - Both AIs get the same safety rules, and their answers go through the same checks. With Claude, if the AI declines a request for safety reasons, Anthropic automatically retries it on a suitable fallback model.
 
+**Planning with Chef:** say **"Plan my day"**, **"Plan tomorrow with a light dinner"** or **"Plan my week"**. Chef makes a real plan with the same rules as the Plan tab (no repeats, everyone's diet, what's in your kitchen, your locked meals kept), adjusts it to what you asked for, and shows it as a card with every meal and the day's calories. Tap **📅 Add to my plan** and it's in the Plan tab. Works without AI too.
+
+**Changing one planned meal:** in the Plan tab, tap **⇄** next to a meal. You get 6 ideas, each with why it fits, its calories and anything you'd need to buy. **🔁 Show other ideas** never shows the same dishes again, **✨ Just pick for me** chooses the best one, or search any recipe by name. Your choice is locked, so "Refresh unlocked meals" keeps it.
+
 **Chef or Recipe Studio?** Both use the same AI. **Chef** is a conversation: ask anything, follow up, get several ideas, plan and shop from the answers. **Recipe Studio** (More → Recipe Studio) is the one-tap form: type a dish (or nothing), pick a meal, and get one full recipe card, plus the fridge-photo scanner.
 
 **Hands-free cooking** (in cook mode, Chrome or Edge): tick **🎤 Hands-free**, then say **"next"**, **"back"**, **"repeat"**, **"timer 5 minutes"** (or just "timer" on a step with a time), **"whistle"** (counts a pressure-cooker whistle), **"done"** on the last step, **"stop"** to stop reading, or **"help"**. Hindi works too: aage, peeche, dobara, seeti. Every new step is read aloud, a box shows when it's listening and what it heard, and it ignores its own voice reading the steps. The microphone works on `localhost` and on `https` sites; on a plain `http://192.168…` address, phones block it.
+
+## Settings (More → ⚙️ Settings)
+
+Saved in your account, so they follow you to every device:
+- **Look:** theme (match my phone, light or dark), colour (saffron, curry leaf, peacock, brinjal, turmeric, chilli), text size (normal, large, extra large), less movement, and show or hide calories.
+- **Starting the app:** open on the Dashboard, Cook, Plan or Kitchen; menu language.
+- **Cooking:** read steps aloud and hands-free voice commands on by default, voice speed (with a "Hear it" button).
+- **Food and health:** vegetarian dishes only, daily calorie goal, and a link to family diets and allergies.
+- **Chef:** short, normal or detailed answers; reply in English, Hindi, Telugu or Tamil (or the language you write in); delete all chats.
+- **Your data:** the 6-month rule, and download or delete your data. **Reset settings** puts everything back.
+
+## Use Ballava on your phone
+
+**A. On the same Wi-Fi (quickest).** Your computer's Wi-Fi address is `192.168.29.192` (find it with `ipconfig`: "Wi-Fi", "IPv4 Address").
+1. Start Ballava on the computer: `docker compose up -d` (or `.venv\Scripts\python manage.py runserver 0.0.0.0:8000` when Docker is off).
+2. Connect your phone to the **same Wi-Fi** as the computer.
+3. On the phone, open Chrome and go to **http://192.168.29.192:8000**. Sign in with the same account as on the computer, and everything is there.
+4. If it stops working one day, your router may have given the computer a new address. Check `ipconfig`, put the new address in `.env` on the `DJANGO_ALLOWED_HOSTS=` line, and run `docker compose up -d --force-recreate`.
+
+Everything works this way, including 📷 photos (the phone's camera opens). Two things need **https**, which this address isn't: 🎤 voice (hands-free cooking, speaking items) and "Add to Home screen". For those, use B.
+
+**B. With a free https link (everything works, even on mobile data).**
+1. Once: `winget install --id Cloudflare.cloudflared`
+2. With Ballava running: `cloudflared tunnel --url http://localhost:8000`
+3. It prints an address like `https://something-random.trycloudflare.com`. Open it on your phone, then Chrome menu → **Add to Home screen** to install Ballava like an app.
+4. Press **Ctrl + C** to stop it. The address changes each time. While it runs, anyone with the address can reach your sign-in page, so share it only with family. (`.env` already allows these addresses.)
+
+**C. Always on, for the whole family:** put it online (step 10) and you get a permanent https address.
 
 ## Your data: kept in your account, for 6 months
 

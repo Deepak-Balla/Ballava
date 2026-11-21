@@ -54,8 +54,14 @@ def recipe_block(r):
             f"Tags: {', '.join(r.get('tags') or []) or 'none'}.\nIngredients: {ing}.\nSteps: {steps[:1800]}")
 
 
-def context_text(ctx, body, current=None, now=None, named=None):
-    """Everything the AI should know, as plain text. `named` is a recipe-book dish the question names."""
+CHEF_LENGTH = {'short': 'Keep answers short: under 80 words unless they ask for steps.',
+               'detailed': 'They like detailed answers: up to 250 words, with tips and reasons.'}
+CHEF_LANGUAGE = {'en': 'English', 'hi': 'Hindi', 'te': 'Telugu', 'ta': 'Tamil'}
+
+
+def context_text(ctx, body, current=None, now=None, named=None, made=None):
+    """Everything the AI should know, as plain text. `named` is a recipe-book dish the question names;
+    `made` is a plan the app drafted because they asked to plan."""
     tz = ctx['tz']
     today = planner.day_key(now, tz)
     slot = planner.slot_now(now, tz)
@@ -65,6 +71,18 @@ def context_text(ctx, body, current=None, now=None, named=None):
     screen = str(body.get('screen') or '')
     if screen in SCREENS:
         out.append(f'The user is on the {SCREENS[screen]} screen.')
+    style = body.get('chefStyle') if isinstance(body.get('chefStyle'), dict) else {}
+    if style.get('length') in CHEF_LENGTH:
+        out.append('Their setting: ' + CHEF_LENGTH[style['length']])
+    if style.get('language') in CHEF_LANGUAGE:
+        out.append(f"Their setting: always reply in {CHEF_LANGUAGE[style['language']]}.")
+    if made:
+        out += ['THE USER ASKED TO PLAN. The app has drafted this plan with its own rules (no repeats, family needs, kitchen):',
+                planner.plan_summary(made, ctx['extra'], today),
+                'Present this plan warmly and briefly (the app shows it as a card with an "Add to my plan" button).'
+                + (' If their message asks for something specific (like a light dinner or more protein), you may change a meal: put '
+                   '"plan": {"breakfast": id, "lunch": id, "dinner": id} with recipe-book ids for the meals you change.'
+                   if made['kind'] == 'day' else ' Do not change the week plan; just describe it.')]
     if current:
         out += ['The recipe open on their screen:', recipe_block(current)]
     pantry_ids = [p['id'] for p in ctx['pantry']]
@@ -117,7 +135,50 @@ def context_text(ctx, body, current=None, now=None, named=None):
     return '\n'.join(out)
 
 
-def clean_reply(data, ctx, current=None, question='', named=None):
+def plan_from_reply(made, reply, ctx):
+    """When the AI talks about a different dish for a meal but forgets to send it in "plan", read it from its words,
+    so the plan card always matches what Chef says. A drafted dish the reply still names is kept."""
+    date, day = next(iter(made['days'].items()))
+    low = reply.lower()
+    drafted = {day.get(s) for s in planner.SLOTS}
+    new = []
+    for r in engine.recipes_from(ctx['extra_recipes'], ctx['hidden']):
+        if r['id'] in drafted:
+            continue
+        at = min((low.find(n) for n in planner.recipe_names(r) if n in low), default=-1)
+        if at >= 0:
+            new.append((at, r))
+    wanted = {}
+    for slot in planner.SLOTS:
+        current = planner.lookup(day.get(slot), ctx['extra'])
+        if current and any(n in low for n in planner.recipe_names(current)):
+            continue  # the drafted dish is still what Chef says
+        near = low.find(slot)
+        fits = sorted((x for x in new if planner.fits_slot(x[1], slot)), key=lambda x: abs(x[0] - near) if near >= 0 else x[0])
+        if fits:
+            wanted[slot] = fits[0][1]['id']
+            new.remove(fits[0])
+    return wanted
+
+
+def adjust_plan(made, wanted, ctx, reply=''):
+    """The AI may change meals in a drafted day plan, but only to real dishes for that meal that suit the family."""
+    if not made or made['kind'] != 'day':
+        return made
+    if not isinstance(wanted, dict) or not wanted:
+        wanted = plan_from_reply(made, reply, ctx)
+    date, day = next(iter(made['days'].items()))
+    day = dict(day)
+    locked = day.get('locked') or []
+    diners = [{**m, 'fasting': False} for m in ctx['members']]
+    for slot in planner.SLOTS:
+        r = planner.lookup(str(wanted.get(slot) or ''), ctx['extra'])
+        if r and slot not in locked and planner.fits_slot(r, slot) and engine.household_check(r, diners)['ok']:
+            day[slot] = r['id']
+    return {**made, 'days': {date: day}}
+
+
+def clean_reply(data, ctx, current=None, question='', named=None, made=None):
     """Check the AI's answer before the phone sees it."""
     reply = str(data.get('reply') or '').strip()
     reply = re.sub(r'\*\*|__|^#+\s*', '', reply, flags=re.M)  # plain text only
@@ -161,5 +222,9 @@ def clean_reply(data, ctx, current=None, question='', named=None):
     if not reply:
         reply = f"Here's a new idea: {recipe['name']}." if recipe else "Sorry, I couldn't answer that. Could you ask another way?"
     followups = [str(f).strip()[:60] for f in (data.get('followups') if isinstance(data.get('followups'), list) else []) if str(f).strip()]
-    return {'reply': reply[:4000], 'dishes': list(dict.fromkeys(dishes))[:4], 'recipe': recipe, 'shopping': shopping[:15],
-            'followups': followups[:3], 'source': 'ai'}
+    out = {'reply': reply[:4000], 'dishes': list(dict.fromkeys(dishes))[:4], 'recipe': recipe, 'shopping': shopping[:15],
+           'followups': followups[:3], 'source': 'ai'}
+    if made:
+        out['plan'] = adjust_plan(made, data.get('plan'), ctx, reply)
+        out['dishes'] = []  # the plan card shows the dishes
+    return out

@@ -464,6 +464,84 @@ def test_calorie_dashboard(api):
     assert names['Mystery'].get('kcal') is None and d['uncounted'] == 1
 
 
+# ---------------------------------------------------------------- planning: from Chef, and changing a meal
+PANTRY = [{'id': i} for i in ['rice', 'toor_dal', 'onion', 'tomato', 'dosa_batter', 'poha', 'curd', 'potato', 'atta']]
+
+
+def test_chef_plans_the_day_without_ai(api):
+    status, body = api.post_json('ai/chat', {'text': 'Plan my day', 'pantry': PANTRY, 'tz': -330})
+    assert status == 200 and body['source'] == 'builtin' and body['plan']['kind'] == 'day'
+    (date, day), = body['plan']['days'].items()
+    assert all(day.get(s) for s in ('breakfast', 'lunch', 'dinner')) and len({day['breakfast'], day['lunch'], day['dinner']}) == 3
+    assert 'Add to my plan' in body['reply']
+    week = api.post_json('ai/chat', {'text': 'plan my week please', 'pantry': PANTRY})[1]['plan']
+    meals = [d[s] for d in week['days'].values() for s in ('breakfast', 'lunch', 'dinner')]
+    assert len(week['days']) == 7 and len(set(meals)) == 21, 'a week with no repeats'
+    assert 'plan' not in api.post_json('ai/chat', {'text': "What's planned for tomorrow?", 'pantry': PANTRY})[1], 'a question, not a request'
+
+
+def test_chef_plan_keeps_locked_meals_and_lets_the_ai_adjust(api, gemini):
+    from kitchen.planner import day_key
+    today = day_key(None, -330)
+    plan = {today: {'breakfast': 'idli', 'locked': ['breakfast']}}
+    fake = gemini(text=json.dumps({'reply': 'A light day for you.', 'plan': {'dinner': 'tomato_rasam', 'breakfast': 'kanda_poha', 'lunch': 'chicken_curry'}}))
+    body = api.post_json('ai/chat', {'text': 'Plan my day with a light dinner', 'pantry': PANTRY, 'plan': plan, 'tz': -330, **{
+        'members': [{'name': 'A', 'diet': 'veg'}]}})[1]
+    day = body['plan']['days'][today]
+    assert day['breakfast'] == 'idli', 'a locked meal is never changed'
+    assert day['dinner'] == 'tomato_rasam', 'the AI may adjust a meal to what they asked for'
+    assert day['lunch'] != 'chicken_curry', "but never to a dish that breaks a family rule"
+    system = fake.calls[0]['config'].system_instruction
+    assert 'THE USER ASKED TO PLAN' in system and 'Idli' in system
+
+
+def test_chef_plan_card_matches_what_chef_says(api, gemini):
+    """Gemini sometimes names a different dinner in its words but forgets the "plan" field: the card follows its words."""
+    from kitchen.planner import day_key
+    today = day_key(None, -330)
+    draft = api.post_json('ai/chat', {'text': 'Plan my day', 'pantry': PANTRY, 'tz': -330})[1]['plan']['days'][today]
+    from kitchen.planner import lookup
+    names = {s: lookup(draft[s])['name'] for s in ('breakfast', 'lunch')}
+    gemini(text=json.dumps({'reply': f"Breakfast is {names['breakfast']}, lunch {names['lunch']}, and for a light dinner have Tomato Rasam."}))
+    day = api.post_json('ai/chat', {'text': 'Plan my day with a light dinner', 'pantry': PANTRY, 'tz': -330})[1]['plan']['days'][today]
+    assert day['dinner'] == 'tomato_rasam' and day['breakfast'] == draft['breakfast'] and day['lunch'] == draft['lunch']
+
+
+def test_chef_follows_the_answer_settings(api, gemini):
+    fake = gemini(text=json.dumps({'reply': 'ok'}))
+    api.post_json('ai/chat', {'text': 'dinner ideas', 'chefStyle': {'length': 'detailed', 'language': 'te'}})
+    system = fake.calls[0]['config'].system_instruction
+    assert 'up to 250 words' in system and 'always reply in Telugu' in system
+
+
+def test_changing_a_meal_keeps_finding_new_dishes(api):
+    from kitchen.planner import day_key
+    today = day_key(None, -330)
+    plan = {today: {'breakfast': 'plain_dosa', 'lunch': 'dal_tadka', 'dinner': 'veg_pulao'}}
+    tried, seen = ['plain_dosa'], []
+    for _ in range(6):  # the old bug: dosa -> idli -> dosa -> idli...
+        pick = api.post_json('brain/swap', {'pantry': PANTRY, 'plan': plan, 'date': today, 'slot': 'breakfast', 'start': today,
+                                            'exclude': tried, 'tz': -330})[1]['recipeId']
+        assert pick and pick not in tried
+        tried.append(pick)
+        seen.append(pick)
+        plan[today]['breakfast'] = pick
+    assert len(set(seen)) == 6
+    page = api.post_json('brain/alternatives', {'pantry': PANTRY, 'plan': plan, 'date': today, 'slot': 'breakfast', 'start': today,
+                                                'exclude': tried, 'limit': 4, 'tz': -330})[1]
+    assert len(page['options']) == 4 and not {o['id'] for o in page['options']} & set(tried)
+    assert all('why' in o and 'missing' in o for o in page['options'])
+
+
+def test_chef_plans_are_saved_with_the_chat(make_user):
+    c = make_user()
+    msg = {'from': 'bot', 'text': 'Your day', 'planned': True,
+           'plan': {'kind': 'day', 'days': {'2026-11-21': {'breakfast': 'idli', 'lunch': 'dal_tadka', 'locked': ['x'], 'evil': 'y'}}}}
+    c.post_json('chats', {'id': 'planchat1', 'title': 'Plan', 'at': 1, 'messages': [msg]})
+    saved = c.get_json('chats')[1]['chats'][0]['messages'][0]
+    assert saved['plan'] == {'kind': 'day', 'days': {'2026-11-21': {'breakfast': 'idli', 'lunch': 'dal_tadka'}}} and saved['planned'] is True
+
+
 def test_saved_dishes_count_as_liked(api):
     pantry = [{'id': i} for i in ['paneer', 'spinach', 'onion', 'tomato', 'ginger', 'garlic', 'green_chilli', 'cumin', 'garam_masala']]
     plain = api.post_json('brain/home', {'pantry': pantry})[1]['ready']

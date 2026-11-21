@@ -33,6 +33,7 @@ urlpatterns = [
     path('brain/home', api.home),
     path('brain/plan', api.plan_week),
     path('brain/swap', api.swap),
+    path('brain/alternatives', api.alternatives),
     path('brain/recommend', api.recommend_view),
     path('brain/plan-info', api.plan_info),
     path('brain/recipe', api.recipe_info),
