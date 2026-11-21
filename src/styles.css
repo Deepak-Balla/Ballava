@@ -272,7 +272,100 @@ details summary { cursor: pointer; font-weight: 600; margin-top: 8px; }
 /* Six tabs need a little less room each */
 .tabbar button { font-size: .7rem; min-width: 0; }
 
-/* ✨ Assistant: floating button on every screen, and the chat sheet */
+/* ✨ AI in the navigation bar: a raised button in the middle */
+.tabbar { align-items: flex-end; }
+.tabbar .ai-tab { color: var(--accent-dark); font-weight: 700; }
+.ai-orb { width: 46px; height: 46px; margin-top: -22px; border-radius: 50%; display: grid; place-items: center; font-size: 1.35rem;
+  background: linear-gradient(135deg, var(--accent), #e08a4c); box-shadow: 0 4px 12px rgba(143, 63, 30, .4), 0 0 0 4px var(--bg); }
+.ai-tab.active .ai-orb { background: linear-gradient(135deg, var(--accent-dark), var(--accent)); transform: scale(1.05); }
+.ai-tab:active .ai-orb { transform: scale(.94); }
+
+/* The AI window: a short window above the navigation bar (a floating panel on wide screens) */
+.assistant-sheet { bottom: calc(66px + env(safe-area-inset-bottom)); background: rgba(30, 15, 5, .3); }
+.app.no-nav .assistant-sheet { bottom: 0; }
+.sheet-inner.assistant { height: min(74vh, 660px); border-radius: 20px 20px 0 0; box-shadow: 0 -6px 24px rgba(60, 30, 10, .18); }
+@media (min-width: 720px) {
+  .assistant-sheet { background: transparent; pointer-events: none; }
+  .sheet-inner.assistant { pointer-events: auto; position: fixed; right: 24px; bottom: calc(80px + env(safe-area-inset-bottom)); width: 410px; margin: 0;
+    border-radius: 18px; height: min(640px, 78vh); box-shadow: 0 12px 40px rgba(60, 30, 10, .25); }
+  .app.no-nav .sheet-inner.assistant { bottom: 24px; }
+}
+.ai-status { font-size: .78rem; display: flex; align-items: center; gap: 5px; }
+.ai-status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.ai-status.on { color: var(--green); } .ai-status.on::before { background: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
+.ai-status.off { color: var(--muted); }
+.head-btn { font-size: 1rem; }
+.head-btn.on { background: var(--accent-soft); }
+.chat-list { flex: 1; min-height: 0; overflow-y: auto; display: grid; gap: 8px; align-content: start; padding: 10px 2px; }
+.chat-list-item { display: flex; gap: 8px; align-items: center; background: var(--card); border-radius: 12px; box-shadow: var(--shadow); padding: 4px 6px 4px 4px; }
+.chat-list-item.on { outline: 2px solid var(--accent); }
+.chat-list-open { flex: 1; min-width: 0; display: grid; text-align: left; border: 0; background: none; padding: 8px; cursor: pointer; }
+.chat-list-open b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-dish { margin-top: 8px; padding: 10px; border-radius: 12px; background: var(--bg); display: grid; gap: 6px; white-space: normal; }
+.chat-dish.new { background: var(--accent-soft); }
+.chat-dish-head { display: grid; }
+.chat-missing { font-size: .85rem; }
+.chat-missing.need { color: var(--amber); } .chat-missing.have { color: var(--green); }
+.chat-warn { font-size: .85rem; background: var(--red-soft); color: #7c1d17; border-radius: 8px; padding: 6px 8px; }
+.chat-dish-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.chat-dish-actions .btn { min-height: 34px; padding: 5px 10px; font-size: .85rem; }
+
+/* Sign-in: Sign in / Create account / Admin */
+.login-tabs { background: var(--card); box-shadow: var(--shadow); margin: 14px 0 0; }
+.login-tabs .seg { white-space: nowrap; font-size: .92rem; padding: 10px 4px; }
+.chips.method { margin-bottom: 2px; }
+.admin-signin { border-top: 4px solid var(--ink); }
+
+/* Dashboard */
+.dashboard .segments { background: var(--card); box-shadow: var(--shadow); margin-bottom: 4px; }
+.today-kcal { display: flex; gap: 16px; align-items: center; }
+.today-kcal-text { min-width: 0; flex: 1; }
+.today-kcal-text p { margin: 4px 0; }
+.bad-text { color: var(--red); font-weight: 600; }
+.goal-ring { --p: 0; flex: none; width: 116px; height: 116px; border-radius: 50%; display: grid; place-items: center;
+  background: conic-gradient(var(--green) calc(var(--p) * 1%), var(--line) 0); }
+.goal-ring.over { background: conic-gradient(var(--red) calc(var(--p) * 1%), var(--line) 0); }
+.goal-ring > div { width: 92px; height: 92px; border-radius: 50%; background: var(--card); display: grid; place-content: center; text-align: center; }
+.goal-ring b { font-size: 1.35rem; font-family: var(--serif); }
+.goal-ring span { font-size: .68rem; color: var(--muted); }
+.goal-form input { max-width: 110px; padding: 6px 8px; border-radius: 10px; border: 1.5px solid var(--line); }
+.dash-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+.dash-stats div { background: var(--card); border-radius: 12px; box-shadow: var(--shadow); padding: 10px 8px; display: grid; justify-items: center; text-align: center; }
+.dash-stats b { font-size: 1.2rem; color: var(--accent); }
+.dash-stats small { font-size: .72rem; color: var(--muted); }
+.dash-grid { display: grid; gap: 0 12px; }
+@media (min-width: 520px) { .dash-grid { grid-template-columns: 1fr 1fr; } }
+.kcal-bars.many { gap: 2px; }
+.kcal-bars.many .kcal-bar, .kcal-bars.many .kcal-bar span { border-radius: 3px; }
+.kcal-bar { position: relative; }
+.goal-mark { position: absolute; left: 0; right: 0; border-top: 2px dashed rgba(47, 125, 79, .7); pointer-events: none; }
+.kcal-col.over .kcal-bar span { background: linear-gradient(180deg, #e46a5c, var(--red)); }
+.macro-wrap { display: flex; gap: 14px; align-items: center; }
+.donut { flex: none; width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; }
+.donut span { width: 56px; height: 56px; border-radius: 50%; background: var(--card); }
+.macro-legend { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; font-size: .9rem; }
+.macro-legend small { color: var(--muted); }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; }
+.sw.protein { background: var(--green); } .sw.carbs { background: #e0a100; } .sw.fat { background: var(--accent); }
+.bar-count.wide { min-width: 44px; }
+.bar-row:has(.bar-count.wide) { grid-template-columns: 90px 1fr 48px; }
+.swap-card { background: var(--green-soft); box-shadow: none; }
+.swap-card p { margin: 4px 0 10px; }
+.meal-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+.meal-table th { text-align: left; font-size: .72rem; color: var(--muted); text-transform: uppercase; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+.meal-table td { padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.meal-table .num { text-align: right; white-space: nowrap; }
+.meal-table .nowrap { white-space: nowrap; }
+.meal-table .btn.link { padding: 0; text-align: left; }
+.kcal-actions { display: inline-flex; flex-direction: column; align-items: flex-end; }
+.kcal-actions .btn.link { padding: 0 2px; font-size: .78rem; }
+.kcal-edit { display: inline-flex; gap: 4px; }
+.kcal-edit input { width: 64px; padding: 4px; border-radius: 8px; border: 1.5px solid var(--line); }
+.kcal-edit .btn { min-height: 30px; padding: 2px 8px; }
+.top-dish { padding: 6px 0; border-top: 1px solid var(--line); }
+.dashboard .btn.whatsapp { width: 100%; margin-top: 4px; }
+
+/* Cook mode only: the floating AI button (there's no navigation bar there) */
 .fab { position: fixed; z-index: 15; right: max(16px, calc(50% - 280px + 16px)); bottom: calc(80px + env(safe-area-inset-bottom));
   display: flex; align-items: center; gap: 4px; border: 0; border-radius: 999px; padding: 9px 13px 9px 11px; cursor: pointer; font-size: .9rem;
   background: linear-gradient(135deg, var(--accent), #d0773e); color: #fff; font-weight: 700; box-shadow: 0 4px 14px rgba(143, 63, 30, .35); }
@@ -345,7 +438,7 @@ details summary { cursor: pointer; font-weight: 600; margin-top: 8px; }
 .line-kcal { display: block; font-size: .72rem; color: var(--muted); }
 .p-name { display: grid; }
 .p-kcal { font-size: .72rem; font-weight: 400; color: var(--muted); }
-.kcal-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; align-items: end; height: 150px; margin: 10px 0 4px; }
+.kcal-bars { display: grid; grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)); gap: 6px; align-items: end; height: 150px; margin: 10px 0 4px; }
 .kcal-col { display: grid; grid-template-rows: auto 1fr auto; height: 100%; gap: 3px; text-align: center; min-width: 0; }
 .kcal-val { font-size: .68rem; color: var(--muted); }
 .kcal-bar { display: flex; align-items: flex-end; background: var(--bg); border-radius: 8px; overflow: hidden; }

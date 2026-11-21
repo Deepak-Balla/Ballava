@@ -109,7 +109,8 @@ def new_family_user(name, *, email=None, phone=None, password=None):
 # ---------------------------------------------------------------- basics
 @endpoint(methods=('GET',))
 def health(request, body):
-    return {'ok': True, 'ai': bool(ai.ai_key()), 'version': '2.0.0'}
+    on = bool(ai.ai_key())
+    return {'ok': True, 'ai': on, 'aiProvider': ai.provider_label() if on else None, 'version': '2.1.0'}
 
 
 @endpoint(methods=('GET',))
@@ -511,6 +512,18 @@ def dashboard_view(request, body):
 
 
 @endpoint(limit=STATE)
+def calories_view(request, body):
+    """The family dashboard: calories per day, nutrients, every meal with its calories, plans and a lighter swap."""
+    ctx = context(body)
+    try:
+        days = max(1, min(31, int(body.get('days') or 7)))
+    except (TypeError, ValueError):
+        days = 7
+    return planner.calorie_dashboard(ctx['log'], days=days, extra=ctx['extra'], tz=ctx['tz'], plan=_dict(body.get('plan')),
+                                     members=ctx['members'], extra_recipes=ctx['extra_recipes'], hidden=ctx['hidden'])
+
+
+@endpoint(limit=STATE)
 def ask(request, body):
     ctx = context(body)
     current = planner.lookup(str(body.get('recipeId') or ''), ctx['extra']) if body.get('recipeId') else None
@@ -530,21 +543,41 @@ def _ai_allowed(request):
 
 @endpoint()
 def ai_invent(request, body):
+    wish = str(body.get('wish') or '')[:300]
+    live = catalog.live()
+    # Asked for a dish that's already in the recipe book? Give exactly that one (no AI needed).
+    book = planner.mentioned_recipe(wish.lower(), live['recipes'], live['hidden'])
+    if book:
+        return {'recipe': book, 'fromBook': True}
     _ai_allowed(request)
     household = [m for m in _list(body.get('household')) if isinstance(m, dict)]
-    args = dict(pantry=_list(body.get('pantry')), household=household, wish=body.get('wish') or '', meal=body.get('meal'))
+    diners = [{**m, 'fasting': False} for m in household]
+    args = dict(pantry=_list(body.get('pantry')), household=household, wish=wish, meal=body.get('meal'))
     avoid = None
-    for _attempt in range(2):  # if the first idea breaks a family rule, ask once more, saying why
+    for _attempt in range(2):  # if an invented idea breaks a family rule, ask once more, saying why
         raw = ai.invent_recipe(**args, avoid=avoid)
         try:
             recipe = engine.normalize_ai_recipe(raw)
         except ValueError as err:
             raise ApiError(502, f'{err}. Please try again.') from err
-        house = engine.household_check(recipe, [{**m, 'fasting': False} for m in household])
+        house = engine.household_check(recipe, diners)
         if house['ok']:
             return {'recipe': recipe}
+        if recipe.get('requested') or engine.names_dish(wish, recipe['name']):
+            # They asked for this dish by name: give exactly that, with a clear warning, never a different dish.
+            return {'recipe': {**recipe, 'requested': True, 'warning': house['reason']}, 'warning': house['reason']}
         avoid = house['reason']
     raise ApiError(502, f"The AI's idea didn't suit your family ({avoid}). Please try again, or add a wish like \"vegetarian\".")
+
+
+@endpoint()
+def ai_estimate(request, body):
+    """Calories for a meal that isn't in the recipe book, for the food diary."""
+    name = str(body.get('name') or '').strip()
+    if not name:
+        raise ApiError(400, 'Please give the name of the food.')
+    _ai_allowed(request)
+    return ai.estimate_meal(name)
 
 
 @endpoint(limit=STATE)
@@ -556,6 +589,7 @@ def ai_chat(request, body):
         raise ApiError(400, 'Please type a question.')
     ctx = context(body)
     current = planner.lookup(str(body.get('recipeId') or ''), ctx['extra']) if body.get('recipeId') else None
+    named = planner.mentioned_recipe(question.lower(), ctx['extra_recipes'], ctx['hidden'])  # "how do I make dal tadka?"
 
     def built_in(note=None):
         r = planner.assistant_reply(question, plan=_dict(body.get('plan')), current=current, **ctx)
@@ -570,11 +604,11 @@ def ai_chat(request, body):
     history = [('assistant' if m.get('from') == 'bot' else 'user', str(m.get('text') or '')[:1500])
                for m in _list(body.get('messages'))[-8:] if isinstance(m, dict) and m.get('text')]
     try:
-        data = ai.chat(question, assistant.context_text(ctx, body, current), history)
+        data = ai.chat(question, assistant.context_text(ctx, body, current, named=named), history)
     except ApiError as err:
         log.warning('AI chat fell back to the built-in answers: %s', err.message)
         return built_in(err.message)
-    return assistant.clean_reply(data, ctx, current)
+    return assistant.clean_reply(data, ctx, current, question=question, named=named)
 
 
 @endpoint(limit=PHOTO)

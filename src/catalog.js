@@ -64,3 +64,14 @@ export function useSoon(pantry, now = Date.now(), within = 2) {
 }
 
 export const shoppingText = ids => 'Ballava shopping list:\n' + ids.map(id => `- ${ingName(id)}`).join('\n');
+
+// What a dish needs that isn't in the kitchen (required items only; salt, oil and water are assumed).
+export function missingFor(recipe, pantry) {
+  if (!recipe) return [];
+  const have = new Set([...pantry.map(p => p.id), ...current.assumed]);
+  return recipe.ingredients.filter(it => !it.optional && !it.options.some(id => have.has(id)));
+}
+export const lineName = it => it.custom || it.options.map(ingName).join(' or ');
+
+// The first meal of the day a dish suits, for "plan it for tomorrow".
+export const slotFor = recipe => SLOTS.find(s => recipe?.meal?.includes(s)) || 'dinner';

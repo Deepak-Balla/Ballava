@@ -10,8 +10,27 @@ function Consent({ value, onChange }) {
   );
 }
 
+const csrfToken = () => (document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/) || [])[1] || '';
+
+// Admins sign in to the admin portal (Django's /admin), never to the family app. This form sends them straight there.
+function AdminSignIn() {
+  const [token, setToken] = useState(csrfToken);
+  useEffect(() => { if (!token) api('auth/config').then(() => setToken(csrfToken())).catch(() => {}); }, [token]);
+  return (
+    <form className="card form admin-signin" method="post" action="admin/login/">
+      <p className="muted small">For the people who run Ballava: recipes, ingredients, announcements and users. Family accounts can't sign in here.</p>
+      <input type="hidden" name="csrfmiddlewaretoken" value={token} />
+      <input type="hidden" name="next" value="/admin/" />
+      <label>Admin username<input name="username" autoComplete="username" required /></label>
+      <label>Admin password<input name="password" type="password" autoComplete="current-password" required /></label>
+      <button className="btn primary big" type="submit">Sign in to admin</button>
+      <p className="muted small">Forgot it? On the server, run <code>python manage.py changepassword &lt;username&gt;</code>.</p>
+    </form>
+  );
+}
+
 export default function Login({ onDone, onGuest, server }) {
-  const [mode, setMode] = useState('signin'); // signin | signup | phone
+  const [mode, setMode] = useState('signin'); // signin | signup | phone | admin
   const [form, setForm] = useState({ name: '', email: '', password: '', phone: '', code: '' });
   const [consent, setConsent] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
@@ -59,10 +78,18 @@ export default function Login({ onDone, onGuest, server }) {
 
         {!server && <div className="note warn">You seem to be offline. You can still use Ballava on this device.</div>}
 
+        <div className="segments login-tabs" role="group" aria-label="Who is signing in">
+          {tab('signin', 'Sign in')}{tab('signup', 'Create account')}{tab('admin', 'Admin')}
+        </div>
+
+        {mode === 'admin' ? <AdminSignIn /> : (
         <form className="card form" onSubmit={submit}>
-          <div className="segments" role="group" aria-label="Sign-in method">
-            {tab('signin', 'Sign in')}{tab('signup', 'Create account')}{config.phone && tab('phone', 'Phone')}
-          </div>
+          {config.phone && (
+            <div className="chips method" role="group" aria-label="Sign in with">
+              <button type="button" className={'chip' + (mode !== 'phone' ? ' on' : '')} aria-pressed={mode !== 'phone'} onClick={() => { setMode(mode === 'phone' ? 'signin' : mode); setCodeSent(false); setError(''); }}>Email</button>
+              <button type="button" className={'chip' + (mode === 'phone' ? ' on' : '')} aria-pressed={mode === 'phone'} onClick={() => { setMode('phone'); setError(''); }}>Phone</button>
+            </div>
+          )}
 
           {(mode === 'signup' || (mode === 'phone' && codeSent)) && <label>Your name<input value={form.name} onChange={set('name')} autoComplete="name" placeholder="e.g. Asha" /></label>}
 
@@ -82,7 +109,9 @@ export default function Login({ onDone, onGuest, server }) {
           <button className="btn primary big" type="submit" disabled={busy}>
             {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : mode === 'signup' ? 'Create account' : codeSent ? 'Verify and continue' : 'Send code'}
           </button>
+          {mode === 'phone' && <p className="muted small">New or returning, the same code works: a new number creates an account.</p>}
         </form>
+        )}
 
         <button className="btn link center-btn" onClick={onGuest}>Continue without an account</button>
         <p className="muted small center">Without an account, your data stays on this device only and can't be shared with family.</p>

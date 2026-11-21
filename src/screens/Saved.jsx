@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { getCatalog, dayKey } from '../catalog.js';
+import { dayKey, missingFor } from '../catalog.js';
 import { Header, Empty, DietDot, SaveButton, kcalOf } from '../ui.jsx';
 import { go } from '../lib.js';
 
@@ -7,12 +7,6 @@ const FILTERS = [['all', 'All'], ['breakfast', 'Breakfast'], ['main', 'Lunch & d
 const SORTS = [['recent', 'Recently saved'], ['forgotten', 'Not made lately'], ['quick', 'Quickest'], ['light', 'Fewest calories']];
 
 const daysSince = (date, today) => Math.round((new Date(today + 'T12:00:00') - new Date(date + 'T12:00:00')) / 86400000);
-
-// What's missing from the kitchen for a dish (main items only; salt, oil and water are assumed).
-export function missingFor(recipe, pantry) {
-  const have = new Set([...pantry.map(p => p.id), ...getCatalog().assumed]);
-  return recipe.ingredients.filter(it => !it.optional && !it.options.some(id => have.has(id)));
-}
 
 export default function Saved({ savedDishes, isSaved, toggleSave, findRecipe, log, pantry }) {
   const [q, setQ] = useState('');

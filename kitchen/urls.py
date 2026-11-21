@@ -35,10 +35,12 @@ urlpatterns = [
     path('brain/plan-info', api.plan_info),
     path('brain/recipe', api.recipe_info),
     path('brain/dashboard', api.dashboard_view),
+    path('brain/calories', api.calories_view),
     path('brain/ask', api.ask),
     # AI Chef
     path('ai/invent', api.ai_invent),
     path('ai/scan', api.ai_scan),
     path('ai/chat', api.ai_chat),
+    path('ai/estimate', api.ai_estimate),
     re_path(r'^.*$', lambda request: JsonResponse({'error': 'Unknown API route'}, status=404)),
 ]

@@ -16,7 +16,7 @@ pytestmark = pytest.mark.django_db
 
 def test_health(api, monkeypatch):
     monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
-    assert api.get_json('health') == (200, {'ok': True, 'ai': False, 'version': '2.0.0'})
+    assert api.get_json('health') == (200, {'ok': True, 'ai': False, 'aiProvider': None, 'version': '2.1.0'})
 
 
 def test_serves_the_app_at_the_root(api, settings, tmp_path):
@@ -397,6 +397,71 @@ def test_ai_chef_asks_again_when_a_dish_breaks_a_family_rule(api, gemini):
     status, body = api.post_json('ai/invent', {'pantry': ['Chicken'], 'household': [{'diet': 'veg'}]})
     assert status == 502 and "didn't suit your family" in body['error'] and len(fake.calls) == 2
     assert 'rejected because' in fake.calls[1]['contents'][0]
+
+
+# ---------------------------------------------------------------- "give me chicken biryani" gives chicken biryani
+BIRYANI = {'name': 'Chicken Biryani', 'diet': 'nonveg', 'requested': True, 'serves': 4,
+           'ingredients': [{'name': 'Chicken', 'quantity': '500 g'}, {'name': 'Basmati rice', 'quantity': '2 cups'},
+                           {'name': 'Curd', 'quantity': '1/2 cup'}, {'name': 'Mint leaves', 'quantity': 'a handful'}],
+           'steps': ['Marinate the chicken in curd and spices.', 'Layer with half-cooked rice and cook on dum.']}
+
+
+def test_ai_chef_gives_exactly_the_dish_asked_for(api, gemini):
+    fake = gemini(text=json.dumps(BIRYANI))
+    status, body = api.post_json('ai/invent', {'pantry': ['Rice', 'Eggs', 'Tomato'], 'wish': 'chicken biryani', 'household': [{'diet': 'veg'}]})
+    assert status == 200 and body['recipe']['name'] == 'Chicken Biryani', 'never swapped for a different dish'
+    assert body['warning'] == "Someone doesn't eat meat or fish" and body['recipe']['requested'] is True
+    assert len(fake.calls) == 1, 'no second attempt for a dish asked for by name'
+    prompt = fake.calls[0]['config'].system_instruction
+    assert 'give EXACTLY that dish' in prompt and 'Never swap it for a different dish' in prompt
+
+
+def test_ai_chef_returns_recipe_book_dishes_without_ai(api, gemini):
+    fake = gemini()
+    status, body = api.post_json('ai/invent', {'pantry': ['Rice'], 'wish': 'Dal Tadka please'})
+    assert status == 200 and body['fromBook'] is True and body['recipe']['id'] == 'dal_tadka' and fake.calls == []
+
+
+def test_chat_answers_about_the_named_recipe_book_dish(api, gemini):
+    fake = gemini(text=json.dumps({'reply': 'Here is how.', 'dishes': ['jeera_rice']}))
+    body = api.post_json('ai/chat', {'text': 'How do I make chole?', **VEG_FAMILY})[1]
+    assert body['dishes'][0] == 'chole', 'the dish they named always comes first'
+    system = fake.calls[0]['config'].system_instruction
+    assert 'answer about exactly this dish' in system and 'Chole' in system and 'They are missing:' in system
+
+
+def test_chat_keeps_a_requested_dish_with_a_warning(api, gemini):
+    gemini(text=json.dumps({'reply': 'Here is chicken biryani.', 'recipe': BIRYANI, 'followups': ['Make it spicier', 'Veg version?']}))
+    body = api.post_json('ai/chat', {'text': 'Give me chicken biryani recipe', **VEG_FAMILY})[1]
+    assert body['recipe']['name'] == 'Chicken Biryani' and body['recipe']['warning'] == "Amma doesn't eat meat or fish"
+    assert body['followups'] == ['Make it spicier', 'Veg version?']
+
+
+def test_built_in_chat_names_the_exact_dish_and_whats_missing(api):
+    body = api.post_json('ai/chat', {'text': 'How do I make dal tadka?', 'pantry': [{'id': 'tomato'}]})[1]
+    assert body['dishes'] == ['dal_tadka'] and "You're missing: Toor dal" in body['reply']
+    body = api.post_json('ai/chat', {'text': 'Give me chicken biryani recipe', **VEG_FAMILY})[1]
+    assert "isn't in the recipe book" in body['reply'] and 'AI' in body['reply']
+
+
+def test_ai_estimates_calories_for_food_from_outside(api, gemini):
+    gemini(text='{"name": "Pizza", "kcal": 700, "protein": 25, "carbs": 80, "fat": 30}')
+    status, body = api.post_json('ai/estimate', {'name': 'Pizza from outside'})
+    assert status == 200 and body == {'kcal': 700, 'protein': 25.0, 'carbs': 80.0, 'fat': 30.0, 'source': 'ai'}
+    gemini(text='{"kcal": null}')
+    assert api.post_json('ai/estimate', {'name': 'a bicycle'})[0] == 422
+    assert api.post_json('ai/estimate', {'name': ''})[0] == 400
+
+
+def test_calorie_dashboard(api):
+    status, d = api.post_json('brain/calories', {'days': 7, 'tz': -330, 'history': [
+        {'id': 'a', 'recipeId': 'dal_tadka', 'name': 'Dal Tadka', 'date': '2026-11-21', 'slot': 'lunch', 'at': 1},
+        {'id': 'b', 'name': 'Pizza from outside', 'date': '2026-11-21', 'slot': 'dinner', 'at': 2, 'nutrition': {'kcal': 700, 'protein': 25, 'source': 'ai'}},
+        {'id': 'c', 'name': 'Mystery', 'date': '2026-11-21', 'slot': 'dinner', 'at': 3}]})
+    assert status == 200 and len(d['days']) == 7 and set(d['macros']['split']) == {'protein', 'carbs', 'fat'}
+    names = {m['name']: m for m in d['meals']}
+    assert names['Pizza from outside']['kcal'] == 700 and names['Pizza from outside']['source'] == 'ai'
+    assert names['Mystery'].get('kcal') is None and d['uncounted'] == 1
 
 
 def test_saved_dishes_count_as_liked(api):

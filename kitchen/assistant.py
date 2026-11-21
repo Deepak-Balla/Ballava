@@ -54,8 +54,8 @@ def recipe_block(r):
             f"Tags: {', '.join(r.get('tags') or []) or 'none'}.\nIngredients: {ing}.\nSteps: {steps[:1800]}")
 
 
-def context_text(ctx, body, current=None, now=None):
-    """Everything the AI should know, as plain text."""
+def context_text(ctx, body, current=None, now=None, named=None):
+    """Everything the AI should know, as plain text. `named` is a recipe-book dish the question names."""
     tz = ctx['tz']
     today = planner.day_key(now, tz)
     slot = planner.slot_now(now, tz)
@@ -67,8 +67,15 @@ def context_text(ctx, body, current=None, now=None):
         out.append(f'The user is on the {SCREENS[screen]} screen.')
     if current:
         out += ['The recipe open on their screen:', recipe_block(current)]
-
     pantry_ids = [p['id'] for p in ctx['pantry']]
+    if named and named is not current:
+        missing = [engine.name_of(o[0]) for o in engine.match_recipe(named, pantry_ids)['missing']]
+        house = engine.household_check(named, [{**m, 'fasting': False} for m in ctx['members']])
+        out += ['The dish they asked about is in the recipe book (answer about exactly this dish):', recipe_block(named),
+                'They are missing: ' + (', '.join(missing) or 'nothing, they have everything') + '.']
+        if not house['ok']:
+            out.append(f"Family rule it breaks: {house['reason']}. Give it anyway, say so kindly, and suggest a version that suits them.")
+
     soon = [engine.name_of(p['id']) for p in engine.use_soon(ctx['pantry'])]
     out.append('Kitchen (what they have): ' + (', '.join(engine.name_of(i) for i in pantry_ids[:120]) or 'nothing added yet')
                + '. Salt, oil and water are always there.')
@@ -110,14 +117,17 @@ def context_text(ctx, body, current=None, now=None):
     return '\n'.join(out)
 
 
-def clean_reply(data, ctx, current=None):
+def clean_reply(data, ctx, current=None, question='', named=None):
     """Check the AI's answer before the phone sees it."""
     reply = str(data.get('reply') or '').strip()
     reply = re.sub(r'\*\*|__|^#+\s*', '', reply, flags=re.M)  # plain text only
     book = engine.recipes_from(ctx['extra_recipes'], ctx['hidden'])
     known = {r['id'] for r in book} | set(ctx['extra'])
     dishes = [d for d in (data.get('dishes') if isinstance(data.get('dishes'), list) else []) if isinstance(d, str) and d in known]
-    if not dishes:
+    if named:
+        # They asked for a recipe-book dish by name: that exact dish always comes first.
+        dishes = [named['id']] + [d for d in dishes if d != named['id']]
+    elif not dishes:
         # The AI named dishes in its answer but forgot their ids: find them by name, in the order they appear.
         # Skip the dish already open, and anything eaten today or yesterday ("since you had dal tadka for lunch...").
         today = planner.day_key(None, ctx['tz'])
@@ -134,9 +144,15 @@ def clean_reply(data, ctx, current=None):
             recipe = engine.normalize_ai_recipe(data['recipe'])
         except (ValueError, TypeError, KeyError):
             recipe = None
+        if recipe and named and engine.names_dish(question, named['name']):
+            recipe = None  # the book already has exactly the dish they asked for
         if recipe:
             house = engine.household_check(recipe, [{**m, 'fasting': False} for m in ctx['members']])
-            if not house['ok']:
+            asked = recipe.get('requested') or engine.names_dish(question, recipe['name'])
+            if not house['ok'] and asked:
+                # They asked for this exact dish: give it, with a clear warning, never a different dish.
+                recipe = {**recipe, 'requested': True, 'warning': house['reason']}  # shown as a warning on the recipe card
+            elif not house['ok']:
                 reply += f"\n\n(I left out a new recipe idea because it doesn't suit your family: {house['reason']}.)"
                 recipe = None
     wanted = data.get('shopping') if isinstance(data.get('shopping'), list) else []
@@ -144,4 +160,6 @@ def clean_reply(data, ctx, current=None):
     shopping = [i for i in shopping if i not in engine.ASSUMED]
     if not reply:
         reply = f"Here's a new idea: {recipe['name']}." if recipe else "Sorry, I couldn't answer that. Could you ask another way?"
-    return {'reply': reply[:4000], 'dishes': list(dict.fromkeys(dishes))[:4], 'recipe': recipe, 'shopping': shopping[:15], 'source': 'ai'}
+    followups = [str(f).strip()[:60] for f in (data.get('followups') if isinstance(data.get('followups'), list) else []) if str(f).strip()]
+    return {'reply': reply[:4000], 'dishes': list(dict.fromkeys(dishes))[:4], 'recipe': recipe, 'shopping': shopping[:15],
+            'followups': followups[:3], 'source': 'ai'}

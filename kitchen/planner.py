@@ -7,6 +7,7 @@ About dates: the server may run in a different time zone from the family (Docker
 on UTC). So every function that needs "today" takes `tz`, the phone's time-zone offset in
 minutes, exactly as the browser reports it (India is -330). It defaults to India.
 """
+import re
 from datetime import date as Date, datetime, timedelta, timezone
 
 from .data.ingredients import ASSUMED, BY_ID
@@ -519,6 +520,103 @@ def dashboard(history=(), now=None, days=7, extra=None, tz=INDIA):
     }
 
 
+# ---------------------------------------------------- the family's calorie dashboard
+NUTRIENTS = ('kcal', 'protein', 'carbs', 'fat', 'fibre')
+
+
+def meal_nutrition(entry, extra=None):
+    """Nutrition of one serving of a logged meal: from the recipe, or what the family typed or the AI estimated."""
+    r = lookup(entry.get('recipeId'), extra) if entry.get('recipeId') else None
+    if r and r.get('nutrition'):
+        return {**{k: r['nutrition'].get(k, 0) for k in NUTRIENTS}, 'source': r['nutrition'].get('source', 'ballava')}
+    n = entry.get('nutrition')
+    if isinstance(n, dict) and isinstance(n.get('kcal'), (int, float)) and 0 < n['kcal'] < 5000:
+        return {**{k: float(n.get(k) or 0) for k in NUTRIENTS}, 'source': n.get('source') or 'manual'}
+    return None
+
+
+def calorie_dashboard(history=(), now=None, days=7, extra=None, tz=INDIA, plan=None, members=(), extra_recipes=(), hidden=()):
+    """Calories for the family dashboard: one serving of each logged meal per day (a rough per-person guide),
+    the split of protein, carbs and fat, calories by meal, every meal with its calories, the dishes that add the most,
+    what's planned, and one lighter swap idea."""
+    log = normalize_log(history, tz)
+    today = day_key(now, tz)
+    dates = [add_days(today, -i) for i in range(days - 1, -1, -1)]
+    in_range = set(dates)
+    per_day = {d: {**dict.fromkeys(NUTRIENTS, 0.0), 'meals': 0, 'counted': 0} for d in dates}
+    slots, meals, dishes = {}, [], {}
+    for e in log:
+        if e['date'] not in in_range:
+            continue
+        n = meal_nutrition(e, extra)
+        day = per_day[e['date']]
+        day['meals'] += 1
+        meals.append({'date': e['date'], 'slot': e.get('slot'), 'name': e.get('name'), 'recipeId': e.get('recipeId'), 'id': e.get('id'),
+                      **({k: round(n[k]) if k == 'kcal' else round(n[k], 1) for k in NUTRIENTS} if n else {}),
+                      'source': n['source'] if n else None})
+        if not n:
+            continue
+        day['counted'] += 1
+        for k in NUTRIENTS:
+            day[k] += n[k]
+        slots.setdefault(e.get('slot') or 'other', []).append(n['kcal'])
+        key = e.get('recipeId') or (e.get('name') or '').lower()
+        row = dishes.setdefault(key, {'id': e.get('recipeId'), 'name': e.get('name'), 'times': 0, 'kcal': round(n['kcal']), 'totalKcal': 0})
+        row['times'] += 1
+        row['totalKcal'] += round(n['kcal'])
+    rows = [{'date': d, **{k: round(v) if k == 'kcal' else (round(v, 1) if isinstance(v, float) else v) for k, v in per_day[d].items()}}
+            for d in dates]
+    logged = [r for r in rows if r['counted']]
+    totals = {k: sum(r[k] for r in logged) for k in ('protein', 'carbs', 'fat')}
+    energy = 4 * totals['protein'] + 4 * totals['carbs'] + 9 * totals['fat']
+    split = {k: round((4 if k != 'fat' else 9) * totals[k] / energy * 100) if energy else 0 for k in totals}
+    avg = lambda key: round(sum(r[key] for r in logged) / len(logged), 1 if key != 'kcal' else None) if logged else None  # noqa: E731
+
+    # What's planned: calories for today and tomorrow, one serving of each planned meal.
+    plan = plan or {}
+
+    def planned(d):
+        ids = [plan.get(d, {}).get(s) for s in SLOTS]
+        ns = [lookup(i, extra)['nutrition'] for i in ids if i and lookup(i, extra) and lookup(i, extra).get('nutrition')]
+        return {'kcal': round(sum(n['kcal'] for n in ns)), 'meals': len(ns)} if ns else None
+
+    return {
+        'days': rows, 'today': next(r for r in rows if r['date'] == today), 'avgKcal': avg('kcal'), 'avgProtein': avg('protein'),
+        'daysLogged': len(logged), 'macros': {**{k: round(v) for k, v in totals.items()}, 'split': split},
+        'bySlot': {s: round(sum(v) / len(v)) for s, v in slots.items()},
+        'meals': sorted(meals, key=lambda m: (m['date'], SLOTS.index(m['slot']) if m['slot'] in SLOTS else 9), reverse=True),
+        'dishes': sorted(dishes.values(), key=lambda d: -d['totalKcal'])[:10],
+        'uncounted': sum(1 for m in meals if m.get('kcal') is None),
+        'planned': {'today': planned(today), 'tomorrow': planned(add_days(today, 1))},
+        'swap': lighter_swap(dishes, extra, members, extra_recipes, hidden),
+    }
+
+
+def lighter_swap(dishes, extra=None, members=(), extra_recipes=(), hidden=()):
+    """The dish adding the most calories this week, and a lighter dish for the same meal that suits the family."""
+    for d in sorted(dishes.values(), key=lambda d: -d['totalKcal']):
+        heavy = lookup(d['id'], extra) if d['id'] else None
+        if not heavy or d['kcal'] < 350:
+            continue
+        meals = set(heavy['meal']) - {'side', 'dessert'}
+        heavy_ids = {o for it in heavy['ingredients'] for o in it['options']}
+        best = None
+        for r in recipes_from(extra_recipes, hidden):
+            n = r.get('nutrition') or {}
+            if r['id'] == heavy['id'] or not meals & set(r['meal']) or n.get('kcal') is None or n['kcal'] > d['kcal'] - 120:
+                continue
+            if n.get('protein', 0) < 6 or not household_check(r, [{**m, 'fasting': False} for m in members])['ok']:
+                continue
+            shared = len(heavy_ids & {o for it in r['ingredients'] for o in it['options']})
+            if not best or shared > best[0]:
+                best = (shared, r)
+        if best:
+            r = best[1]
+            return {'from': {'id': heavy['id'], 'name': heavy['name'], 'kcal': d['kcal']},
+                    'to': {'id': r['id'], 'name': r['name'], 'kcal': r['nutrition']['kcal']}, 'saves': d['kcal'] - r['nutrition']['kcal']}
+    return None
+
+
 # ---------------------------------------------------- sharing with a house cook
 MENU_WORDS = {
     'en': {'hello': "Today's menu", 'breakfast': 'Breakfast', 'lunch': 'Lunch', 'dinner': 'Dinner', 'note': 'Special portions'},
@@ -555,13 +653,23 @@ HOW_WORDS = ('how do', 'how to', 'how can', 'fix', 'too ', 'sticky', 'salty', 'b
              'lumpy', 'curdled', 'split', 'sour', 'raw taste', 'went wrong', 'save it', 'rescue')
 
 
+DESCRIPTORS = {'punjabi', 'instant', 'quick', 'easy', 'one-pot', 'homestyle', 'home-style', 'simple', 'classic', 'everyday', 'plain',
+               'south', 'north', 'indian', 'style', 'special', 'healthy', 'spicy', 'crispy', 'soft'}
+
+
+def recipe_names(r):
+    """Every way people might name a dish: 'Punjabi Chole' is also 'chole' (its id) and 'One-Pot Chicken Pulao' is 'chicken pulao'."""
+    names = {r['name'].lower(), r['id'].replace('_', ' '), *(a.strip().lower() for a in (r.get('alt') or '').split(' / '))}
+    names.add(' '.join(w for w in r['name'].lower().split() if w not in DESCRIPTORS))
+    return {n for n in names if len(n) > 3}
+
+
 def mentioned_recipe(q, extra_recipes=(), hidden=()):
-    """The recipe a question names ('calories in dal tadka?'), preferring the longest name that matches."""
+    """The recipe a question names ('calories in dal tadka?', 'how do I make chole'), preferring the longest name that matches."""
     best = None
     for r in recipes_from(extra_recipes, hidden):
-        for name in [r['name'], *(r.get('alt') or '').split(' / ')]:
-            name = name.strip().lower()
-            if len(name) > 3 and name in q and (not best or len(name) > best[0]):
+        for name in recipe_names(r):
+            if (not best or len(name) > best[0]) and re.search(rf'(?<![a-z]){re.escape(name)}(?![a-z])', q):
                 best = (len(name), r)
     return best[1] if best else None
 
@@ -613,6 +721,18 @@ def assistant_reply(text, plan=None, now=None, tz=INDIA, current=None, **ctx):
             return {'reply': head + '\n' + '\n'.join(
                         f"{n}. {r['recipe']['name']}: {r['recipe']['nutrition']['kcal']} kcal, protein {round(r['recipe']['nutrition']['protein'])} g"
                         for n, r in enumerate(rows, 1)), 'dishes': [r['recipe']['id'] for r in rows]}
+    if named and not wants_list:
+        # "How do I make dal tadka?" / "chicken curry recipe": exactly that dish, and what's missing for it.
+        missing = [_name(o[0]) for o in match_recipe(named, [p['id'] for p in ctx.get('pantry') or []])['missing']]
+        n = named.get('nutrition') or {}
+        house = household_check(named, [{**m, 'fasting': False} for m in ctx.get('members') or []])
+        lines = [f"{named['name']}: {named['time']} min, serves {named['serves']}"
+                 + (f", about {n['kcal']} kcal a serving" if n.get('kcal') is not None else '') + '.',
+                 f"You're missing: {', '.join(missing)}." if missing else 'You have everything you need.',
+                 'Tap below for the full recipe and steps.']
+        if not house['ok']:
+            lines.insert(1, f"Please note: {house['reason']}.")
+        return {'reply': '\n'.join(lines), 'dishes': [named['id']]}
     if asks(*HOW_WORDS) and not named:
         fixes = find_rescue(q)
         if fixes and len(fixes) < len(RESCUES):
@@ -654,5 +774,16 @@ def assistant_reply(text, plan=None, now=None, tz=INDIA, current=None, **ctx):
             return {'reply': f"With {', '.join(_name(i) for i in found)} you could make:\n"
                              + '\n'.join(f"{n}. {r['recipe']['name']} ({r['recipe']['time']} min{status(r)})" for n, r in enumerate(pick, 1)),
                     'dishes': [r['recipe']['id'] for r in pick]}
+    if asks('recipe', 'how do i make', 'how to make', 'give me', 'i want', 'cook'):
+        # A dish that isn't in the book ("chicken biryani"): say so honestly, and offer the closest ones we have.
+        words = {w for w in q.replace('?', ' ').split() if len(w) > 3} - {'recipe', 'make', 'give', 'want', 'cook', 'please', 'tonight', 'today'}
+        close = [r for r in recipes_from(ctx.get('extra_recipes') or (), ctx.get('hidden') or ())
+                 if words & set(r['name'].lower().split()) and household_check(r, ctx.get('members') or [])['ok']][:3]
+        if close:
+            return {'reply': "That exact dish isn't in the recipe book yet, and new recipes need AI switched on. "
+                             f"The closest dishes I have: {', '.join(r['name'] for r in close)}.", 'dishes': [r['id'] for r in close]}
+        if words:
+            return {'reply': "That dish isn't in the recipe book yet. With AI switched on I can give you the exact recipe and tell you "
+                             'what to buy. Meanwhile, try "What should I cook tonight?"'}
     return {'reply': 'I can answer simple questions right now. Try "What should I cook tonight?", "Tiffin ideas", '
                      '"Calories in dal tadka?", "High protein dinner", "Rice is too sticky" or "I have paneer and spinach".'}

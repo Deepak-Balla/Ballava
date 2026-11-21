@@ -86,6 +86,18 @@ def more(page, name):
     page.get_by_role('button', name=name, exact=True).click()
 
 
+def diary(page):
+    """The food diary: Dashboard tab, then 'Food diary'."""
+    tab(page, 'Dashboard')
+    page.get_by_role('button', name='📖 Food diary').click()
+
+
+def open_ai(page):
+    """The ✨ AI button in the middle of the navigation bar."""
+    tab(page, 'AI assistant')
+    page.get_by_role('dialog', name='Ballava AI').wait_for()
+
+
 def no_sideways_scroll(page, where):
     over = page.evaluate('document.documentElement.scrollWidth - window.innerWidth')
     assert over <= 0, f'{where} scrolls sideways by {over}px'

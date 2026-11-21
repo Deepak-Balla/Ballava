@@ -7,7 +7,7 @@ import pytest
 from django.contrib.auth.models import User
 from playwright.sync_api import expect
 
-from .e2e_helpers import DESKTOP, browser, device, errors, more, no_sideways_scroll, site, snap, tab  # noqa: F401
+from .e2e_helpers import DESKTOP, browser, device, diary, errors, more, no_sideways_scroll, open_ai, site, snap, tab  # noqa: F401
 
 pytestmark = pytest.mark.e2e
 
@@ -149,7 +149,7 @@ def test_pin_a_family_tradition(page):
 
 
 def test_log_meals_and_see_the_dashboard(page):
-    tab(page, 'Track')
+    diary(page)
     dish = page.get_by_label('Dish name', exact=True)
     page.get_by_role('button', name='Dinner', exact=True).click()
     dish.fill('Dal Tadka')
@@ -165,8 +165,21 @@ def test_log_meals_and_see_the_dashboard(page):
     page.locator('.diary-item', has_text='Jeera Rice').wait_for()
     expect(page.locator('.bar-row', has_text='Protein').locator('.bar-count')).to_have_text('1')
     page.locator('.insights').wait_for()
+    snap(page, '24-diary')
+    no_sideways_scroll(page, 'Food diary')
+
+    # Food from outside has no calories until you add them.
+    page.get_by_role('button', name='📊 Overview').click()
+    row = page.locator('.meal-table tr', has_text='Pizza from outside')
+    row.get_by_role('button', name='Add kcal').click()
+    row.get_by_label('Calories for Pizza from outside').fill('650')
+    row.get_by_role('button', name='OK').click()
+    row.get_by_text('650').wait_for()
+    page.locator('.meal-table tr', has_text='Dal Tadka').first.wait_for()
     snap(page, '24-dashboard')
-    no_sideways_scroll(page, 'Track')
+    no_sideways_scroll(page, 'Dashboard')
+
+    page.get_by_role('button', name='📖 Food diary').click()
     page.get_by_role('button', name='Remove Pizza from outside').click()
     expect(page.locator('.diary-item', has_text='Pizza')).to_have_count(0)
 
@@ -189,19 +202,27 @@ def test_finishing_a_cook_logs_it_and_keeps_leftovers(page, site):
     page.get_by_role('radio', name='4 stars').click()
     page.get_by_role('button', name='Save and finish').click()
     page.locator('.stats').get_by_text('meals cooked').wait_for()
-    tab(page, 'Track')
+    diary(page)
     page.locator('.diary-item', has_text='Jeera Rice').nth(1).wait_for()
 
 
-def test_ask_ballava_knows_the_plan(page):
-    more(page, 'Ask Ballava')
+def test_ai_window_knows_the_plan(page):
+    tab(page, 'Plan')
+    open_ai(page)
     page.get_by_role('button', name="What's planned for tomorrow?").click()
     page.locator('.bubble.bot', has_text="Tomorrow's plan").wait_for()
     page.get_by_label('Your question').fill('I have paneer and spinach')
     page.get_by_role('button', name='Send').click()
-    page.locator('.bubble.bot', has_text='Palak Paneer').wait_for()
-    snap(page, '25-ask')
-    no_sideways_scroll(page, 'Ask')
+    card = page.locator('.bubble.bot .chat-dish', has_text='Palak Paneer')
+    card.wait_for()
+    card.get_by_role('button', name='📅 Tomorrow').click()
+    page.get_by_text(re.compile("Planned Palak Paneer for tomorrow's")).wait_for()
+    snap(page, '25-ai-window')
+    no_sideways_scroll(page, 'AI window')
+    tab(page, 'AI assistant')
+    page.goto(page.url.split('#')[0] + '#/ask')  # the old Ask Ballava address opens the AI window
+    page.get_by_role('dialog', name='Ballava AI').wait_for()
+    tab(page, 'AI assistant')
 
 
 def test_data_follows_you_to_a_second_phone(page, device, site):
@@ -210,7 +231,7 @@ def test_data_follows_you_to_a_second_phone(page, device, site):
     sign_in(phone2, site)
     tab(phone2, 'Plan')
     phone2.locator('.plan-day').first.wait_for()
-    tab(phone2, 'Track')
+    diary(phone2)
     phone2.locator('.diary-item', has_text='Dal Tadka').wait_for()
     more(phone2, 'Family')
     phone2.get_by_text('Dadaji').first.wait_for()
@@ -329,6 +350,19 @@ def test_phone_sign_in(device, site):
     p.context.close()
 
 
+def test_admin_signs_in_from_the_admin_tab(device, site):
+    p = device()
+    p.goto(site)
+    p.get_by_role('button', name='Admin', exact=True).click()
+    snap(p, '21-login-admin-tab')
+    p.get_by_label('Admin username').fill(ADMIN['email'])
+    p.get_by_label('Admin password').fill(ADMIN['password'])
+    p.get_by_role('button', name='Sign in to admin').click()
+    p.get_by_text('Meals logged').wait_for()
+    assert '/admin/' in p.url
+    p.context.close()
+
+
 def test_family_user_cannot_get_into_admin(device, site):
     p = device(DESKTOP)
     admin_sign_in(p, site, {'email': ASHA['email'], 'password': ASHA['password']})
@@ -395,7 +429,7 @@ def test_admin_publishes_a_recipe_and_users_see_it(page, device, site):
 
 
 def test_every_screen_fits_a_phone(page, site):
-    for route in ['home', 'plan', 'track', 'pantry', 'list', 'more', 'family', 'bachao', 'ask', 'account', 'ai', 'recipe/dal_tadka', 'saved']:
+    for route in ['home', 'plan', 'dashboard', 'track', 'pantry', 'list', 'more', 'family', 'bachao', 'ask', 'account', 'ai', 'recipe/dal_tadka', 'saved']:
         page.goto(f'{site}#/{route}')
         page.wait_for_timeout(150)
         no_sideways_scroll(page, route)

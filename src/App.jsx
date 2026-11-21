@@ -12,7 +12,7 @@ import Family from './screens/Family.jsx';
 import Shopping from './screens/Shopping.jsx';
 import AiChef from './screens/AiChef.jsx';
 import Plan from './screens/Plan.jsx';
-import Track from './screens/Track.jsx';
+import Dashboard from './screens/Dashboard.jsx';
 import More from './screens/More.jsx';
 import Account from './screens/Account.jsx';
 import Login from './screens/Login.jsx';
@@ -74,7 +74,7 @@ export default function App() {
   }, [sessionLost]);
 
   useEffect(() => {
-    api('health').then(d => setAiStatus({ checked: true, ai: !!d.ai, server: true }))
+    api('health').then(d => setAiStatus({ checked: true, ai: !!d.ai, provider: d.aiProvider || null, server: true }))
       .catch(() => setAiStatus({ checked: true, ai: false, server: false }));
     loadMe().catch(() => {
       // No connection: if this device was signed in, keep working from what it has.
@@ -142,7 +142,8 @@ export default function App() {
   }, [savedIds, setSavedDishes, setAiRecipes, notify]);
 
   const [screen, param] = route;
-  useEffect(() => { setChatOpen(false); }, [screen, param]);
+  // Moving to another screen closes the AI window; the old #/ask address opens it.
+  useEffect(() => { setChatOpen(screen === 'ask'); }, [screen, param]);
   if (screen === 'vote') return <Vote token={param} />;
 
   if (!auth.checked) return <div className="splash"><span className="brand-mark">B</span></div>;
@@ -177,37 +178,47 @@ export default function App() {
     case 'list': body = <Shopping {...ctx} />; break;
     case 'ai': body = <AiChef {...ctx} />; break;
     case 'plan': body = <Plan {...ctx} />; break;
-    case 'track': body = <Track {...ctx} />; break;
+    case 'dashboard': case 'track': body = <Dashboard {...ctx} view={screen === 'track' ? 'diary' : 'overview'} />; break;
     case 'more': body = <More {...ctx} />; break;
-    case 'ask': body = <Assistant full screen="ask" ctx={ctx} />; break;
     case 'saved': body = <Saved {...ctx} />; break;
     case 'account': body = <Account {...ctx} />; break;
-    default: body = <Home {...ctx} />;
+    default: body = <Home {...ctx} />; // also #/ask, the old chat address: Home with the AI window open
   }
 
+  // ✨ AI sits in the middle of the bar, so it's one tap away on every screen.
   const tabs = [
-    ['home', 'Cook', '🍳'], ['plan', 'Plan', '🗓️'], ['track', 'Track', '📊'], ['pantry', 'Kitchen', '🧺'], ['list', 'List', '🛒'], ['more', 'More', '☰'],
+    ['home', 'Cook', '🍳'], ['plan', 'Plan', '🗓️'], ['pantry', 'Kitchen', '🧺'], ['ai-chat', 'AI', '✨'], ['list', 'List', '🛒'],
+    ['dashboard', 'Dashboard', '📊'], ['more', 'More', '☰'],
   ];
-  const moreScreens = ['more', 'family', 'bachao', 'ask', 'account', 'saved'];
-  const active = id => (id === 'more' ? moreScreens.includes(screen) : screen === id || (id === 'home' && !['plan', 'track', 'pantry', 'list', ...moreScreens].includes(screen)));
+  const moreScreens = ['more', 'family', 'bachao', 'account', 'saved'];
+  const active = id => (id === 'ai-chat' ? chatOpen
+    : id === 'more' ? moreScreens.includes(screen)
+      : id === 'dashboard' ? ['dashboard', 'track'].includes(screen)
+        : screen === id || (id === 'home' && !['plan', 'track', 'dashboard', 'pantry', 'list', ...moreScreens].includes(screen)));
   const hideNav = screen === 'cook';
   const listCount = shopping.filter(s => !s.done).length;
 
   return (
-    <div className={'app' + (hideNav ? ' no-nav' : '') + (screen === 'recipe' ? ' on-recipe' : '')}>
+    <div className={'app' + (hideNav ? ' no-nav' : '')}>
       <main>{body}</main>
-      {screen !== 'ask' && !chatOpen && <AssistantButton onOpen={() => setChatOpen(true)} />}
+      {hideNav && !chatOpen && <AssistantButton onOpen={() => setChatOpen(true)} />}
       {chatOpen && <Assistant screen={screen} param={param} onClose={() => setChatOpen(false)} ctx={ctx} />}
       {toast && <div className="toast" role="status">{toast}</div>}
       {!hideNav && (
         <nav className="tabbar" aria-label="Main">
-          {tabs.map(([id, label, icon]) => (
-            <button key={id} className={active(id) ? 'active' : ''} onClick={() => go(id)} aria-label={t(label)}>
+          {tabs.map(([id, label, icon]) => (id === 'ai-chat' ? (
+            <button key={id} className={'ai-tab' + (chatOpen ? ' active' : '')} onClick={() => setChatOpen(o => !o)}
+              aria-label="AI assistant" aria-expanded={chatOpen}>
+              <span className="ai-orb" aria-hidden="true">✨</span>
+              <span>AI</span>
+            </button>
+          ) : (
+            <button key={id} className={active(id) && !chatOpen ? 'active' : ''} onClick={() => { setChatOpen(false); go(id); }} aria-label={t(label)}>
               <span className="tab-icon" aria-hidden="true">{icon}</span>
               <span>{t(label)}</span>
               {id === 'list' && listCount > 0 && <span className="badge">{listCount}</span>}
             </button>
-          ))}
+          )))}
         </nav>
       )}
     </div>

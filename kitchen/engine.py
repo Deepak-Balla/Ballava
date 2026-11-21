@@ -423,7 +423,20 @@ def normalize_ai_recipe(raw):
         'hasChilli': any(first(it) in ('green_chilli', 'red_chilli_powder', 'dry_red_chilli') for it in ing),
     }
     recipe['nutrition'] = _ai_nutrition(recipe, raw.get('nutrition'))
+    if raw.get('requested') is True:
+        recipe['requested'] = True  # the user asked for this dish by name
     return recipe
+
+
+GENERIC_WORDS = {'quick', 'easy', 'simple', 'style', 'home', 'homestyle', 'special', 'recipe', 'with', 'and', 'the', 'healthy', 'tasty', 'classic'}
+
+
+def names_dish(question, dish_name):
+    """Did the question ask for this dish by name? 'give me chicken biryani' names 'Chicken Biryani' (and 'Easy Chicken Biryani')."""
+    q = set(normalize(question).split())
+    words = [w for w in normalize(dish_name).split() if len(w) > 2 and w not in GENERIC_WORDS]
+    hits = sum(1 for w in words if w in q or w.rstrip('s') in q)
+    return bool(words) and hits >= min(2, len(words)) and hits / len(words) >= 0.6
 
 
 ALLERGENS = ('dairy', 'gluten', 'nuts', 'egg', 'seafood')

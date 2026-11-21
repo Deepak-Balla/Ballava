@@ -5,7 +5,7 @@ import re
 import pytest
 from playwright.sync_api import expect
 
-from .e2e_helpers import browser, device, errors, site, snap, tab, more  # noqa: F401  (pytest fixtures)
+from .e2e_helpers import browser, device, errors, open_ai, site, snap, tab, more  # noqa: F401  (pytest fixtures)
 
 pytestmark = pytest.mark.e2e
 
@@ -128,22 +128,38 @@ def test_ai_chef_explains_it_is_switched_off(page):
     page.get_by_text(re.compile('AI_PROVIDER')).wait_for()
 
 
-def test_assistant_opens_on_every_tab_and_answers(page):
-    for name in ['Cook', 'Plan', 'Track', 'Kitchen', 'List', 'More']:
+def test_ai_is_in_the_navigation_on_every_tab(page):
+    for name in ['Cook', 'Plan', 'Kitchen', 'List', 'Dashboard', 'More']:
         tab(page, name)
-        page.get_by_role('button', name='Open the Ballava assistant').click()
-        page.get_by_role('dialog', name='Ballava assistant').wait_for()
-        page.get_by_role('button', name='Close assistant').click()
-        expect(page.get_by_role('dialog', name='Ballava assistant')).to_have_count(0)
+        open_ai(page)
+        page.get_by_text('AI is off · quick answers').wait_for()
+        tab(page, 'AI assistant')  # the same button closes it again
+        expect(page.get_by_role('dialog', name='Ballava AI')).to_have_count(0)
     tab(page, 'Cook')
-    page.get_by_role('button', name='Open the Ballava assistant').click()
+    open_ai(page)
     page.get_by_label('Your question').fill('How many calories in dal tadka?')
     page.get_by_role('button', name='Send').click()
     page.locator('.bubble.bot', has_text='kcal per serving').wait_for()
-    snap(page, '09-assistant')
-    page.locator('.assistant .dish-chip', has_text='Dal Tadka').click()
+    page.get_by_label('Your question').fill('How do I make chole?')
+    page.get_by_role('button', name='Send').click()
+    card = page.locator('.chat-dish', has_text='Punjabi Chole')
+    card.get_by_text(re.compile('Missing \\d+:')).wait_for()
+    snap(page, '09-ai-window')
+    card.get_by_role('button', name='🛒 Add missing').click()
+    card.get_by_role('button', name='✓ On your list').wait_for()
+
+
+def test_every_chat_is_kept(page):
+    page.get_by_role('button', name=re.compile('Your chats')).click()
+    page.locator('.chat-list-item', has_text='How many calories in dal tadka?').wait_for()
+    page.get_by_role('button', name='New chat').click()
+    page.get_by_text("Hi! I'm Ballava AI").wait_for()
+    page.get_by_role('button', name=re.compile('Your chats')).click()
+    page.locator('.chat-list-open', has_text='How many calories').click()
+    page.locator('.bubble.me', has_text='How do I make chole?').wait_for()
+    page.locator('.chat-dish', has_text='Dal Tadka').get_by_role('button', name='Open recipe').click()
     page.get_by_role('heading', name=re.compile('Dal Tadka')).wait_for()
-    expect(page.get_by_role('dialog', name='Ballava assistant')).to_have_count(0), 'opening a dish closes the chat'
+    expect(page.get_by_role('dialog', name='Ballava AI')).to_have_count(0), 'opening a dish closes the chat'
 
 
 def test_recipe_shows_calories_and_can_be_saved(page):
@@ -166,9 +182,20 @@ def test_recipe_shows_calories_and_can_be_saved(page):
     page.get_by_text('Nothing saved yet').wait_for()
 
 
-def test_calories_in_the_diary_and_the_light_filter(page):
-    tab(page, 'Track')
-    page.locator('.kcal-card').wait_for()
+def test_dashboard_shows_calories_and_meals(page):
+    tab(page, 'Dashboard')
+    page.locator('.goal-ring').wait_for()
+    page.locator('.meal-table tr', has_text='Dal Tadka').first.wait_for()
+    page.get_by_role('button', name=re.compile('Daily goal')).click()
+    page.get_by_label('Daily calorie goal per person').fill('1500')
+    page.get_by_role('button', name='Save', exact=True).click()
+    page.get_by_text('of 1,500 kcal').wait_for()
+    page.get_by_role('button', name='30 days').click()
+    expect(page.locator('.kcal-col')).to_have_count(30)
+    snap(page, '12-dashboard')
+
+
+def test_calories_and_the_light_filter(page):
     tab(page, 'Cook')
     page.get_by_role('button', name='Light (≤400 kcal)').click()
     expect(page.locator('.dish-card .kcal').first).to_be_visible()

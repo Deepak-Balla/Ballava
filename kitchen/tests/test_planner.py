@@ -262,6 +262,38 @@ def test_ask_ballava_answers_food_questions_without_ai():
     assert eggs['dishes'] and all('egg' in {o for it in R[i]['ingredients'] for o in it['options']} for i in eggs['dishes'][:2])
 
 
+def test_calorie_dashboard_adds_up_and_suggests_a_lighter_swap():
+    from kitchen.planner import calorie_dashboard
+    hist = [logged('aloo_paratha', d, slot='breakfast') for d in range(3)] + [logged('dal_tadka', 0, slot='lunch')]
+    hist.append({'name': 'Samosa from the shop', 'date': MONDAY, 'slot': 'snack', 'nutrition': {'kcal': 260, 'protein': 4, 'carbs': 30, 'fat': 14}})
+    d = calorie_dashboard(hist, now=NOW, days=7, plan={MONDAY: {'dinner': 'palak_paneer'}}, members=[{'name': 'A', 'diet': 'veg'}])
+    paratha, dal = R['aloo_paratha']['nutrition']['kcal'], R['dal_tadka']['nutrition']['kcal']
+    assert d['today']['kcal'] == paratha + dal + 260 and d['today']['counted'] == 3
+    assert d['daysLogged'] == 3 and d['avgKcal'] == round((3 * paratha + dal + 260) / 3)
+    assert sum(d['macros']['split'].values()) in (99, 100, 101)
+    assert d['dishes'][0]['name'] == 'Aloo Paratha' and d['dishes'][0]['times'] == 3
+    assert d['planned']['today'] == {'kcal': R['palak_paneer']['nutrition']['kcal'], 'meals': 1}
+    swap = d['swap']
+    assert swap['from']['id'] == 'aloo_paratha' and swap['saves'] >= 120 and {'breakfast', 'lunch'} & set(R[swap['to']['id']]['meal'])
+    assert R[swap['to']['id']]['diet'] == 'veg', 'the swap suits the family'
+
+
+def test_dishes_are_recognised_by_their_everyday_names():
+    from kitchen.planner import mentioned_recipe
+    for q, rid in [('how do i make chole?', 'chole'), ('chicken pulao recipe', 'chicken_pulao'), ('calories in ragi dosa', 'ragi_dosa'),
+                   ('how to make dosa', 'plain_dosa'), ('give me palak paneer', 'palak_paneer'), ('dal tadka', 'dal_tadka')]:
+        assert (mentioned_recipe(q) or {}).get('id') == rid, q
+    assert mentioned_recipe('i have curd and rice') is None, 'ingredients are not dish names'
+
+
+def test_names_dish():
+    from kitchen.engine import names_dish
+    assert names_dish('give me chicken biryani', 'Chicken Biryani')
+    assert names_dish('chicken biryani please', 'Easy Chicken Biryani')
+    assert not names_dish('something with eggs', 'Quick Egg Tomato Rice')
+    assert not names_dish('chicken biryani', 'Quick Egg Tomato Rice'), 'a different dish is not what they asked for'
+
+
 def test_ask_ballava_respects_the_family():
     kw = dict(pantry=[{'id': i} for i in ['chicken', 'onion', 'tomato']], members=[{'name': 'Amma', 'diet': 'veg'}], now=NOW, log=[])
     assert 'chicken' not in assistant_reply('dinner ideas', **kw)['reply'].lower()

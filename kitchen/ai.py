@@ -40,11 +40,16 @@ RECIPE_SHAPE = """{"name": "...", "alt": "local name if any", "cuisine": "...", 
  "steps": [{"text": "one clear instruction", "minutes": number or null}],
  "nutrition": {"kcal": calories per serving, "protein": grams per serving, "carbs": grams, "fat": grams},
  "allergens": ["dairy" / "gluten" / "nuts" / "egg" / "seafood" that the dish contains],
+ "requested": true if the user asked for this dish by name, else false,
  "why": "one sentence on why the flavours work", "safety": "a food-safety note if needed, else empty"}"""
 
-RECIPE_RULES = """Recipe rules: realistic home cooking, 4-9 short steps, give every ingredient a quantity, include the cooking oil or ghee you use,
-assume salt and water are available, use at most 2 ingredients that are not in the kitchen and mark nice-to-haves optional.
-Never break a family rule (diet, Jain, no onion/garlic, allergies, diabetes means no sweet dishes)."""
+RECIPE_RULES = """Recipe rules: realistic home cooking, 4-10 short steps, give every ingredient a quantity, include the cooking oil or ghee you use,
+assume salt and water are available, mark nice-to-haves optional.
+- If the user names a specific dish (for example "chicken biryani"), give EXACTLY that dish, the real way it is made, with its full
+  ingredient list, even when the kitchen doesn't have everything. Never swap it for a different dish, and set "requested": true.
+  The app shows them what is missing and adds it to their shopping list.
+- Only when they don't name a dish, invent one mostly from what is in the kitchen (at most 2 ingredients they don't have),
+  and never break a family rule (diet, Jain, no onion/garlic, allergies, diabetes means no sweet dishes)."""
 
 
 def ingredient_names():
@@ -54,7 +59,8 @@ def ingredient_names():
 
 
 def invent_system():
-    return f"""You are Ballava, a warm, practical Indian home-cooking chef. You invent ONE realistic dish a home cook can make, mostly from what they already have.
+    return f"""You are Ballava, a warm, practical Indian home-cooking chef. You give ONE realistic recipe: exactly the dish the cook asks for
+when they name one, otherwise a dish invented mostly from what they already have.
 {SAFETY_RULES}
 {RECIPE_RULES}
 When an ingredient is one of these, use exactly this name: {ingredient_names()}.
@@ -87,12 +93,17 @@ How the app works (for "how do I" questions):
 Style: warm, practical and short (usually under 120 words; longer only for steps). Plain text only: no markdown, no headings, no tables,
 no asterisks. Use short lines, or lines starting with "- " for lists. Reply in the language the user writes in (English, Hindi, Telugu,
 Tamil, or a mix like Hinglish).
-When you suggest dishes, prefer RECIPE BOOK dishes that suit the family (and that they can cook now), name them in the reply, and put
-their ids in "dishes" (at most 4). Only use ids from the recipe book.
-Only when the user asks for a new or different dish that is not in the recipe book, put one full new recipe in "recipe". {RECIPE_RULES}
+When the user asks for a SPECIFIC dish by name ("chicken biryani", "how do I make dal tadka"), answer about exactly that dish:
+- If it is in the RECIPE BOOK, put its id FIRST in "dishes", give a short summary, and say which of its ingredients they don't have.
+- If it is not in the recipe book, put that exact dish in "recipe" (never a different or "easier" dish) and say what they need to buy.
+- If it breaks a family rule (for example meat for a vegetarian member), still give it, say so kindly, and suggest a version that suits them.
+When they ask for ideas without naming a dish, prefer RECIPE BOOK dishes that suit the family (and that they can cook now), name them in
+the reply, and put their ids in "dishes" (at most 4). Only use ids from the recipe book.
+When they ask for a new or different dish that is not in the recipe book, put one full new recipe in "recipe". {RECIPE_RULES}
 When the user wants to buy something, or you suggest buying a few items, put the ingredient names in "shopping".
+In "followups", suggest 2 or 3 short next questions they might tap (under 6 words each).
 Reply with ONLY a JSON object, no other text:
-{{"reply": "your answer", "dishes": ["recipe_id", ...], "recipe": null, "shopping": []}}
+{{"reply": "your answer", "dishes": ["recipe_id", ...], "recipe": null, "shopping": [], "followups": []}}
 where "recipe", when you include one, has this shape:
 {RECIPE_SHAPE}"""
 
@@ -108,6 +119,11 @@ def provider():
 
 def key_name():
     return PROVIDERS.get(provider(), '')
+
+
+def provider_label():
+    """For the chat window: which AI is answering."""
+    return {'gemini': 'Google Gemini', 'claude': 'Anthropic Claude'}.get(provider(), provider())
 
 
 def ai_key():
@@ -300,6 +316,29 @@ def invent_recipe(pantry=(), household=(), wish='', meal=None, avoid=None):
     if avoid:
         content += f'\nYour last idea was rejected because: {avoid}. Make a different dish that follows every family rule.'
     return extract_json(call_ai(invent_system(), content, max_tokens=6000))
+
+
+ESTIMATE_SYSTEM = """You estimate the nutrition of ONE ordinary Indian home or restaurant serving of the food named.
+Reply with ONLY JSON: {"name": "tidy name of the food", "kcal": number, "protein": grams, "carbs": grams, "fat": grams}.
+If it isn't a food, reply {"kcal": null}."""
+
+
+def estimate_meal(name):
+    """Calories for a meal that isn't in the recipe book ('pizza from outside', 'masala dosa at a hotel')."""
+    data = extract_json(call_ai(ESTIMATE_SYSTEM, f'Food: {str(name)[:120]}', max_tokens=1500))
+    try:
+        kcal = float(data.get('kcal'))
+    except (TypeError, ValueError):
+        raise ApiError(422, "That doesn't look like a food I can estimate.") from None
+    if not 5 <= kcal <= 3000:
+        raise ApiError(422, "That doesn't look like a food I can estimate.")
+
+    def grams(key):
+        try:
+            return round(max(0.0, min(400.0, float(data.get(key) or 0))), 1)
+        except (TypeError, ValueError):
+            return 0.0
+    return {'kcal': round(kcal), 'protein': grams('protein'), 'carbs': grams('carbs'), 'fat': grams('fat'), 'source': 'ai'}
 
 
 def scan_photo(image, media_type='image/jpeg'):

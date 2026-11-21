@@ -8,7 +8,6 @@ export default function More({ prefs, setPrefs, auth, members, savedDishes }) {
     ['saved', '❤️', 'Saved dishes', savedDishes.length ? `${savedDishes.length} saved` : 'Tap ♡ on any dish to keep it here'],
     ['family', '👪', t('Family'), members.length ? `${members.length} added` : 'Diets, allergies and goals'],
     ['bachao', '🛟', 'Bachao!', 'Rescue a dish that went wrong'],
-    ['ask', '💬', t('Ask Ballava'), 'Chat about cooking, calories and swaps'],
     ['ai', '✨', 'AI Chef', 'Invent a dish, or scan your fridge'],
     ['account', '👤', t('Account'), auth.user ? auth.user.name : 'Sign in to share with family'],
   ];
