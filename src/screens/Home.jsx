@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { useSoon, daysLeft, defaultExpiry, dayKey, addDays, SLOTS, SLOT_LABEL } from '../catalog.js';
 import { go, useBrain } from '../lib.js';
 import { t } from '../i18n.js';
+import { FastPicker, FastToggle, fastingText, whoFasts } from '../fasting.jsx';
 import { DietDot, ingName, expiryLabel, Thinking, SaveButton, kcalOf } from '../ui.jsx';
 
 const FILTERS = [
@@ -75,14 +76,15 @@ function SavedRow({ savedDishes, findRecipe, log, isSaved, toggleSave }) {
   );
 }
 
-export function TodayCard({ plan, findRecipe, log, logMeal, notify }) {
+export function TodayCard(ctx) {
+  const { plan, findRecipe, log, logMeal, notify } = ctx;
   const today = dayKey();
   const day = plan[today];
   const slots = SLOTS.filter(s => day?.[s] && findRecipe(day[s]));
   if (!slots.length) {
     return (
       <div className="card today-card">
-        <h3>{t("Today's menu")}</h3>
+        <div className="row between"><h3>{t("Today's menu")}</h3><FastToggle date={today} ctx={ctx} /></div>
         <p className="muted">Let Ballava decide. Plan the whole week in one tap.</p>
         <button className="btn primary" onClick={() => go('plan')}>{t('Plan my week')}</button>
       </div>
@@ -91,12 +93,13 @@ export function TodayCard({ plan, findRecipe, log, logMeal, notify }) {
   return (
     <div className="card today-card">
       <div className="row between"><h3>{t("Today's menu")}</h3><button className="btn link" onClick={() => go('plan')}>Change</button></div>
-      {slots.map(s => {
-        const r = findRecipe(day[s]);
+      <FastToggle date={today} ctx={ctx} />
+      {[...slots.map(s => [s, day[s], false]), ...SLOTS.filter(s => day.vrat?.[s] && findRecipe(day.vrat[s])).map(s => [s, day.vrat[s], true])].map(([s, id, vrat]) => {
+        const r = findRecipe(id);
         const done = log.some(e => e.date === today && e.slot === s && e.recipeId === r.id);
         return (
-          <div key={s} className="plan-row">
-            <span className="plan-slot">{t(SLOT_LABEL[s])}</span>
+          <div key={(vrat ? 'v' : '') + s} className="plan-row">
+            <span className="plan-slot">{vrat && '🪔 '}{t(SLOT_LABEL[s])}</span>
             <button className="plan-dish" onClick={() => go('recipe/' + r.id)}><DietDot diet={r.diet} /> {r.name}</button>
             <span className="plan-actions">
               {done ? <span className="pill good">✓</span> : <button className="icon-btn sm" aria-label={`Mark ${r.name} as cooked`} onClick={() => { logMeal({ recipeId: r.id, name: r.name, date: today, slot: s }); notify(`Logged ${r.name}`); }}>✓</button>}
@@ -108,14 +111,17 @@ export function TodayCard({ plan, findRecipe, log, logMeal, notify }) {
   );
 }
 
-export default function Home({ pantry, addToPantry, members, filters, setFilters, history, log, logMeal, plan, aiRecipes, aiStatus, notify, findRecipe, catalog, family,
-  savedDishes, isSaved, toggleSave, openAssistant }) {
+export default function Home(ctx) {
+  const { pantry, addToPantry, members, filters, setFilters, history, log, plan, aiRecipes, aiStatus, notify, findRecipe, catalog, family,
+    savedDishes, isSaved, toggleSave, openAssistant } = ctx;
   const today = dayKey();
   // Python (kitchen/api.py -> home) ranks the dishes: what you have, what's spoiling, recent repeats and family goals.
   const brain = useBrain('home', { ...family, filters, plan }, pantry.length > 0);
   const withRecipe = rows => (rows || []).map(r => ({ ...r, recipe: findRecipe(r.recipe) })).filter(r => r.recipe);
   const ready = useMemo(() => withRecipe(brain.data?.ready), [brain.data, findRecipe]);
   const almost = useMemo(() => withRecipe(brain.data?.almost), [brain.data, findRecipe]);
+  const fast = brain.data?.fast || null; // someone fasts today
+  const vrat = useMemo(() => withRecipe(brain.data?.vrat), [brain.data, findRecipe]);
   const tips = brain.data?.tips || [];
   const prep = brain.data?.prep || [];
   const eveningNudge = new Date().getHours() >= 18 && !log.some(e => e.date === today);
@@ -162,7 +168,7 @@ export default function Home({ pantry, addToPantry, members, filters, setFilters
       </button>
 
       {catalog.announcements.map(a => <div key={a.id} className="note info">📣 {a.text}</div>)}
-      <TodayCard plan={plan} findRecipe={findRecipe} log={log} logMeal={logMeal} notify={notify} />
+      <TodayCard {...ctx} />
       {prep.length > 0 && (
         <button className="card prep-card link-card" onClick={() => go('plan')}>
           <h3>🌙 {t('Prep for tomorrow')}</h3>
@@ -191,12 +197,20 @@ export default function Home({ pantry, addToPantry, members, filters, setFilters
       </div>
       {members.length > 0 && <p className="muted small">Showing dishes that suit everyone in your family ({members.map(m => m.name).join(', ')}).</p>}
 
-      <h3 className="section-title">{t('Cook now')} <span className="count">{ready.length}</span></h3>
       <Thinking state={brain}>Finding dishes for you…</Thinking>
+      {fast && (
+        <section className="fast-today">
+          <h3 className="section-title">🪔 Fasting dishes{fast.all ? '' : ` for ${whoFasts(fast)}`} <span className="count">{vrat.length}</span></h3>
+          <p className="muted small">{fastingText(fast)} today{fast.festival ? ` for ${fast.festival}` : ''}.{fast.all ? '' : ' Dishes for the others come after these.'} Families keep a fast in different ways, so skip anything yours avoids.</p>
+          <FastPicker date={today} ctx={ctx} />
+          <div className="dish-list">{vrat.map(r => <DishCard key={r.recipe.id} r={r} isSaved={isSaved} toggleSave={toggleSave} />)}</div>
+        </section>
+      )}
+      {!fast?.all && <><h3 className="section-title">{t('Cook now')} <span className="count">{ready.length}</span></h3>
       {brain.data && ready.length === 0 && <p className="muted">Nothing complete yet. Check "Almost there" below, or add more to your kitchen.</p>}
-      <div className="dish-list">{ready.slice(0, 12).map(r => <DishCard key={r.recipe.id} r={r} isSaved={isSaved} toggleSave={toggleSave} />)}</div>
+      <div className="dish-list">{ready.slice(0, 12).map(r => <DishCard key={r.recipe.id} r={r} isSaved={isSaved} toggleSave={toggleSave} />)}</div></>}
 
-      <SavedRow savedDishes={savedDishes} findRecipe={findRecipe} log={log} isSaved={isSaved} toggleSave={toggleSave} />
+      <SavedRow savedDishes={fast?.all ? savedDishes.filter(s => findRecipe(s.id)?.tags?.includes('vrat')) : savedDishes} findRecipe={findRecipe} log={log} isSaved={isSaved} toggleSave={toggleSave} />
 
       {tips.length > 0 && (
         <div className="card tip-card">
@@ -207,8 +221,8 @@ export default function Home({ pantry, addToPantry, members, filters, setFilters
         </div>
       )}
 
-      <h3 className="section-title">{t('Almost there')} <span className="count">{almost.length}</span></h3>
-      <div className="dish-list">{almost.slice(0, 10).map(r => <DishCard key={r.recipe.id} r={r} isSaved={isSaved} toggleSave={toggleSave} />)}</div>
+      {!fast?.all && <><h3 className="section-title">{t('Almost there')} <span className="count">{almost.length}</span></h3>
+      <div className="dish-list">{almost.slice(0, 10).map(r => <DishCard key={r.recipe.id} r={r} isSaved={isSaved} toggleSave={toggleSave} />)}</div></>}
 
       {Object.keys(aiRecipes).length > 0 && (
         <>

@@ -9,7 +9,9 @@ from django.test import Client
 from google.genai import errors as gemini_errors
 from google.genai import types as gemini_types
 
-from kitchen import ai
+from kitchen import ai, engine
+from kitchen.models import Festival
+from kitchen.planner import SLOTS, add_days, day_key
 
 pytestmark = pytest.mark.django_db
 
@@ -559,3 +561,103 @@ def test_gemini_refusal_and_cut_off_answers(api, gemini):
     assert "couldn't help" in api.post_json('ai/invent', {'pantry': ['egg']})[1]['error']
     gemini(text='', finish=gemini_types.FinishReason.MAX_TOKENS)
     assert 'cut short' in api.post_json('ai/invent', {'pantry': ['egg']})[1]['error']
+
+
+# ---------------------------------------------------------------- fasting days
+VRAT = {r['id'] for r in engine.ALL_RECIPES if 'vrat' in r['tags']}
+
+
+def test_choosing_to_fast_changes_every_recommendation_that_day(api):
+    today = day_key()
+    tomorrow = add_days(today, 1)
+    body = {'pantry': PANTRY, 'members': [{'name': 'Amma'}, {'name': 'Dad'}], 'fastDays': {tomorrow: ['*']}, 'start': today}
+    plan = api.post_json('brain/plan', body)[1]['plan']
+    assert {plan[tomorrow][s] for s in SLOTS} <= VRAT and plan[tomorrow]['fastFor'] == 'all'
+    assert not {plan[today][s] for s in SLOTS} <= VRAT
+    swap = {**body, 'plan': plan, 'slot': 'lunch', 'limit': 6}
+    ideas = api.post_json('brain/alternatives', {**swap, 'date': tomorrow})[1]['options']
+    assert ideas and {o['id'] for o in ideas} <= VRAT and 'Good for your fast' in ideas[0]['why']
+    assert not {o['id'] for o in api.post_json('brain/alternatives', {**swap, 'date': today})[1]['options']} <= VRAT
+    assert api.post_json('brain/swap', {**swap, 'date': tomorrow})[1]['recipeId'] in VRAT
+    assert set(api.post_json('brain/recommend', {**body, 'date': tomorrow, 'slot': 'dinner'})[1]['ids']) <= VRAT
+    vote = api.post_json('brain/vote-options', {**body, 'plan': plan, 'meals': [{'date': tomorrow, 'slot': s} for s in SLOTS]})[1]['meals']
+    ids = [o['id'] for m in vote for o in m['options']]
+    assert {m['fast'] for m in vote} == {'fasting day'}
+    assert len(ids) == 9 and len(set(ids)) == 9 and set(ids) <= VRAT
+    assert vote[0]['options'][0]['id'] == plan[tomorrow]['breakfast'], 'the planned dish comes first'
+    # Only Dad: Amma's meals stay usual, and Dad's own meals can be swapped for other fasting dishes.
+    body['fastDays'] = {tomorrow: ['Dad']}
+    plan = api.post_json('brain/plan', {**body, 'days': 1, 'start': tomorrow})[1]['plan']
+    assert list(plan) == [tomorrow] and set(plan[tomorrow]['vrat'].values()) <= VRAT
+    mine = api.post_json('brain/alternatives', {**body, 'plan': plan, 'date': tomorrow, 'slot': 'lunch', 'vrat': True})[1]['options']
+    assert mine and {o['id'] for o in mine} <= VRAT
+    usual = api.post_json('brain/alternatives', {**body, 'plan': plan, 'date': tomorrow, 'slot': 'lunch'})[1]['options']
+    assert not {o['id'] for o in usual} <= VRAT
+
+
+def test_cook_screen_on_a_fasting_day(api):
+    today = day_key()
+    family = [{'name': 'Amma'}, {'name': 'Dad'}]
+    usual = api.post_json('brain/home', {'pantry': PANTRY, 'members': family})[1]
+    assert usual['fast'] is None and usual['vrat'] == []
+    some = api.post_json('brain/home', {'pantry': PANTRY, 'members': family, 'fastDays': {today: ['Dad']}})[1]
+    assert some['fast']['who'] == ['Dad'] and {r['recipe'] for r in some['vrat']} <= VRAT
+    assert [r['recipe'] for r in some['ready']] and not {r['recipe'] for r in some['ready']} <= VRAT, 'the others still cook as usual'
+    everyone = api.post_json('brain/home', {'pantry': PANTRY, 'members': family, 'fastDays': {today: ['*']}})[1]
+    assert everyone['fast']['all'] and everyone['vrat'] and {r['recipe'] for r in everyone['ready'] + everyone['almost']} <= VRAT
+    guest = api.post_json('brain/home', {'pantry': PANTRY, 'fastDays': {today: ['*']}})[1]
+    assert guest['fast']['all'] and {r['recipe'] for r in guest['ready'] + guest['almost']} <= VRAT
+    # The recipe page says so too.
+    info = lambda **over: api.post_json('brain/recipe', {'recipeId': 'dal_tadka', 'members': family, **over})[1]['house']  # noqa: E731
+    assert info() == {'ok': True, 'notes': []}
+    assert 'Dad is fasting today' in info(fastDays={today: ['Dad']})['notes'][0]
+    assert info(fastDays={today: ['*']})['ok'] is False
+    assert api.post_json('brain/recipe', {'recipeId': 'samak_khichdi', 'members': family, 'fastDays': {today: ['*']}})[1]['house']['ok']
+
+
+def test_a_fasting_festival_changes_the_day_for_everyone(api):
+    day = add_days(day_key(), 2)
+    f = Festival.objects.create(name='Nomulu', date=day, fast=True)
+    plan = api.post_json('brain/plan', {'pantry': PANTRY})[1]['plan']
+    assert {plan[day][s] for s in SLOTS} <= VRAT and plan[day]['festival'] == 'Nomulu'
+    fasts = api.post_json('brain/fasts', {'pantry': PANTRY})[1]['fasts']
+    assert list(fasts) == [day] and fasts[day]['festival'] == 'Nomulu' and set(fasts[day]['ideas']) <= VRAT and len(fasts[day]['ideas']) == 4
+    # One tick says "we don't keep this one".
+    assert api.post_json('brain/fasts', {'pantry': PANTRY, 'notKept': [str(f.pk)]})[1]['fasts'] == {}
+    assert 'fastFor' not in api.post_json('brain/plan', {'pantry': PANTRY, 'notKept': [str(f.pk)]})[1]['plan'][day]
+    f.fast = False
+    f.save()
+    assert api.post_json('brain/fasts', {'pantry': PANTRY})[1]['fasts'] == {}
+
+
+def test_bad_fasting_input_is_ignored_or_refused(api):
+    for odd in ('x', ['x'], {'2026-13-99': ['*']}, {day_key(): 'yes'}):
+        assert api.post_json('brain/plan', {'pantry': PANTRY, 'fastDays': odd, 'notKept': 'x'})[0] == 200, odd
+    assert api.post_json('brain/plan', {'pantry': PANTRY, 'start': 'soon'})[0] == 400
+    assert api.post_json('brain/alternatives', {'pantry': PANTRY, 'date': 'soon', 'slot': 'lunch'})[0] == 400
+
+
+def test_chef_is_told_about_fasting_days_and_plans_for_them(api, gemini):
+    today = day_key()
+    fake = gemini(text=json.dumps({'reply': 'A light fasting day.', 'plan': {'lunch': 'dal_tadka', 'dinner': 'samak_khichdi'}}))
+    r = api.post_json('ai/chat', {'text': 'Plan my day', 'pantry': PANTRY, 'members': [{'name': 'Amma'}], 'fastDays': {today: ['*']}})[1]
+    day = r['plan']['days'][today]
+    assert {day[s] for s in SLOTS} <= VRAT, 'Chef cannot put dal on a day everyone fasts'
+    sent = fake.calls[0]['config'].system_instruction
+    assert 'FASTING DAYS: today: everyone' in sent and 'Amma' not in sent
+
+
+def test_recipe_studio_invents_fasting_dishes_on_a_fasting_day(api, gemini):
+    dal = {'name': 'Dal Surprise', 'ingredients': [{'name': 'Toor dal', 'quantity': '1 cup'}], 'steps': [{'text': 'Boil the dal well.'}, {'text': 'Serve it hot.'}]}
+    vrat = {'name': 'Makhana Bowl', 'ingredients': [{'name': 'Makhana', 'quantity': '2 cups'}, {'name': 'Curd', 'quantity': '1 cup'}],
+            'steps': [{'text': 'Roast the makhana.'}, {'text': 'Fold into curd.'}]}
+    fake = gemini(text=json.dumps(vrat))
+    r = api.post_json('ai/invent', {'pantry': ['Makhana'], 'fasting': True})
+    assert r[0] == 200 and r[1]['recipe']['name'] == 'Makhana Bowl' and 'vrat' in r[1]['recipe']['tags']
+    assert 'Everyone is fasting' in fake.calls[0]['contents'][0]
+    fake = gemini(text=json.dumps(dal))
+    status, body = api.post_json('ai/invent', {'pantry': ['Makhana'], 'household': [{'diet': 'veg', 'fasting': True}]})
+    assert status == 502 and 'fasting' in body['error'] and len(fake.calls) == 2, 'asked again, then said why'
+    named = api.post_json('ai/invent', {'pantry': [], 'wish': 'dal surprise', 'fasting': True})[1]
+    assert named['recipe']['name'] == 'Dal Surprise' and 'fasting' in named['warning'], 'a dish asked for by name always comes, with a warning'
+    assert api.post_json('ai/invent', {'pantry': ['Makhana'], 'household': [{'diet': 'veg', 'fasting': True}, {'diet': 'veg'}]})[0] == 200, 'only one person fasts'

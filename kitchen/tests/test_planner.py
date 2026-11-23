@@ -2,8 +2,9 @@
 from datetime import datetime, timedelta, timezone
 
 from kitchen.engine import ALL_RECIPES, RECIPE_BY_ID, household_check
+from kitchen import engine
 from kitchen.planner import (SLOTS, TIFFIN_IDS, add_days, assistant_reply, base_of, dashboard, day_key, day_recipe_ids, days_between,
-                             fasters_on, goal_score, groups_of, leftover_chains, mains_of, menu_message, normalize_log, plan_groceries,
+                             fast_on, goal_score, groups_of, leftover_chains, mains_of, menu_message, normalize_log, plan_groceries,
                              plan_week, plates_for, prep_for, prep_tonight, recommend, repeat_check, slot_now)
 
 R = RECIPE_BY_ID
@@ -153,19 +154,106 @@ def test_tiffin_on_school_days_for_each_child_never_repeated():
     assert plan[add_days(MONDAY, 5)]['tiffins'] == {} and plan[add_days(MONDAY, 6)]['tiffins'] == {}
 
 
-def test_fasting_gets_a_separate_vrat_meal():
-    plan = plan_week(start=MONDAY, pantry=KITCHEN, now=NOW, members=[{'name': 'Dad', 'fastWeekdays': [1]}, {'name': 'Riya'}])
-    assert 'vrat' in R[plan[MONDAY]['fast']['Dad']]['tags']
-    assert plan[MONDAY]['dinner']
-    assert plan[add_days(MONDAY, 1)]['fast'] == {}
+def is_vrat(id_):
+    return 'vrat' in R[id_]['tags']
 
 
-def test_festival_fasts_only_when_observed():
-    festivals = [{'id': 'ek', 'name': 'Ekadashi', 'date': add_days(MONDAY, 2), 'fast': True}]
-    assert fasters_on(add_days(MONDAY, 2), [{'name': 'Amma'}], festivals, [])['festival'] is None
-    plan = plan_week(start=MONDAY, pantry=KITCHEN, now=NOW, members=[{'name': 'Amma'}], festivals=festivals, observed=['ek'])
-    day = plan[add_days(MONDAY, 2)]
-    assert day['festival'] == 'Ekadashi' and 'vrat' in R[day['fast']['Family']]['tags']
+def test_fasting_dishes_contain_only_fasting_food():
+    dishes = [r for r in ALL_RECIPES if 'vrat' in r['tags']]
+    for r in dishes:
+        for it in r['ingredients']:
+            if not it['optional']:
+                assert all(i in engine.VRAT_OK for i in it['options']), (r['id'], it['options'])
+    for slot in SLOTS:
+        assert len([r for r in dishes if slot in r['meal']]) >= 8, f'enough variety for {slot}'
+
+
+def test_everyone_fasting_gets_three_fasting_meals_that_day_only():
+    family = [{'name': 'Amma', 'fastWeekdays': [1]}, {'name': 'Dad', 'fastWeekdays': [1]}]
+    fasts = {MONDAY: fast_on(MONDAY, family)}
+    assert fasts[MONDAY] == {'all': True, 'who': ['Amma', 'Dad'], 'festival': None, 'key': 'all'}
+    plan = plan_week(start=MONDAY, pantry=KITCHEN, now=NOW, members=family, fasts=fasts)
+    day = plan[MONDAY]
+    assert all(is_vrat(day[s]) for s in SLOTS) and len({day[s] for s in SLOTS}) == 3
+    assert day['fastFor'] == 'all' and 'vrat' not in day
+    mains = [R[day[s]]['ingredients'][0]['options'][0] for s in SLOTS]
+    assert len(set(mains)) == 3, f'not potatoes all day: {mains}'
+    others = [plan[add_days(MONDAY, i)] for i in range(1, 7)]
+    assert all('fastFor' not in d for d in others)
+    # Fasting dishes aren't pushed on ordinary days.
+    assert sum(is_vrat(d[s]) for d in others for s in ('lunch', 'dinner')) <= 1
+
+
+def test_one_person_fasting_gets_their_own_meals_and_the_rest_eat_as_usual():
+    family = [{'name': 'Dad', 'fastWeekdays': [1], 'diet': 'veg'}, {'name': 'Riya'}]
+    fasts = {MONDAY: fast_on(MONDAY, family)}
+    plan = plan_week(start=MONDAY, pantry=KITCHEN, now=NOW, members=family, fasts=fasts)
+    day = plan[MONDAY]
+    assert day['fastFor'] == 'Dad' and set(day['vrat']) == set(SLOTS)
+    assert all(is_vrat(i) for i in day['vrat'].values()) and len(set(day['vrat'].values())) == 3
+    assert not all(is_vrat(day[s]) for s in SLOTS)
+    assert set(day['vrat'].values()) <= set(day_recipe_ids(day)), 'groceries and prep count the fasting meals too'
+    assert 'vrat' not in plan[add_days(MONDAY, 1)]
+    # A fasting meal the family locked stays.
+    locked = {MONDAY: {**day, 'vrat': {**day['vrat'], 'lunch': 'danyachi_amti'}, 'locked': ['vrat:lunch']}}
+    again = plan_week(start=MONDAY, days=1, pantry=KITCHEN, now=NOW, members=family, fasts=fasts, existing=locked)
+    assert again[MONDAY]['vrat']['lunch'] == 'danyachi_amti'
+    assert 'Vrat, Dad' in menu_message(day) and R[day['vrat']['dinner']]['name'] in menu_message(day)
+
+
+def test_fasting_meals_respect_allergies_and_diet_rules():
+    family = [{'name': 'Amma', 'allergies': ['nuts', 'dairy'], 'jain': True}]
+    plan = plan_week(start=MONDAY, pantry=KITCHEN, now=NOW, members=family, fasts={MONDAY: fast_on(MONDAY, family, choices={MONDAY: ['*']})})
+    for s in SLOTS:
+        r = R[plan[MONDAY][s]]
+        assert is_vrat(r['id']) and r['jainOk'] and not {'nuts', 'dairy'} & set(r['allergens']), r['id']
+
+
+def test_a_locked_meal_stays_even_on_a_fasting_day():
+    plan = plan_week(start=MONDAY, days=1, pantry=KITCHEN, now=NOW, fasts={MONDAY: fast_on(MONDAY, choices={MONDAY: ['*']})},
+                     existing={MONDAY: {'lunch': 'dal_tadka', 'locked': ['lunch']}})
+    assert plan[MONDAY]['lunch'] == 'dal_tadka' and is_vrat(plan[MONDAY]['dinner'])
+
+
+def test_fasting_festivals_are_kept_unless_the_family_says_no():
+    day = add_days(MONDAY, 2)
+    festivals = [{'id': 'ek', 'name': 'Ekadashi', 'date': day, 'fast': True}, {'id': 'x', 'name': 'Bhogi', 'date': add_days(day, 1), 'fast': False}]
+    fast = fast_on(day, [], festivals)
+    assert fast == {'all': True, 'who': [], 'festival': 'Ekadashi', 'key': 'all'}
+    assert fast_on(add_days(day, 1), [], festivals) is None, 'a festival that is not a fast'
+    assert fast_on(day, [], festivals, not_kept=['ek']) is None
+    plan = plan_week(start=MONDAY, pantry=KITCHEN, now=NOW, fasts={day: fast})
+    assert plan[day]['festival'] == 'Ekadashi' and all(is_vrat(plan[day][s]) for s in SLOTS)
+    assert 'Ekadashi' in menu_message(plan[day])
+    # Small children, and people who are pregnant or diabetic, aren't put on a festival fast automatically...
+    family = [{'name': 'Amma'}, {'name': 'Riya', 'age': 'child'}, {'name': 'Nani', 'diabetic': True}, {'name': 'Meera', 'goals': ['pregnancy']}]
+    assert fast_on(day, family, festivals)['who'] == ['Amma']
+    # ...but what the family chooses for the day always wins.
+    assert fast_on(day, family, festivals, choices={day: ['Amma', 'Riya']})['who'] == ['Amma', 'Riya']
+    assert fast_on(day, family, festivals, choices={day: ['*']})['all'] is True
+    assert fast_on(day, family, festivals, choices={day: []}) is None
+
+
+def test_choosing_a_fasting_day_and_skipping_a_weekly_one():
+    family = [{'name': 'Amma', 'fastWeekdays': [1]}, {'name': 'Dad'}]
+    assert fast_on(MONDAY, family)['key'] == 'Amma'
+    assert fast_on(MONDAY, family, choices={MONDAY: []}) is None
+    assert fast_on(add_days(MONDAY, 3), family) is None
+    assert fast_on(add_days(MONDAY, 3), family, choices={add_days(MONDAY, 3): ['Dad']})['who'] == ['Dad']
+    # A "Fasting today" tick from an older version counts for today only.
+    assert fast_on(MONDAY, [{'name': 'Dad', 'fasting': True}], today=MONDAY)['all']
+    assert fast_on(add_days(MONDAY, 1), [{'name': 'Dad', 'fasting': True}], today=MONDAY) is None
+
+
+def test_built_in_chef_suggests_fasting_dishes():
+    ask = lambda q, members: assistant_reply(q, pantry=KITCHEN, members=members, now=NOW)  # noqa: E731
+    everyone = ask('What should I cook for dinner?', [{'name': 'Amma', 'fasting': True}])
+    assert 'fasting day' in everyone['reply'] and everyone['dishes'] and all(is_vrat(d) for d in everyone['dishes'])
+    some = ask('What should I cook for dinner?', [{'name': 'Amma', 'fasting': True}, {'name': 'Dad'}])
+    assert 'For Amma (fasting)' in some['reply'] and not all(is_vrat(d) for d in some['dishes'])
+    for q in ('What can I eat during my vrat?', 'nomulu recipes', 'ideas for my fast'):
+        assert all(is_vrat(d) for d in ask(q, [])['dishes']) and ask(q, [])['dishes'], q
+    assert not all(is_vrat(d) for d in ask('breakfast ideas, what should I make', [])['dishes'])
 
 
 def test_prep_reminders():

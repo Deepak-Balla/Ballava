@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import secrets
+import string
 from datetime import datetime, timedelta
 
 from django.conf import settings
@@ -325,7 +326,8 @@ def clean_message(m):
     plan = m.get('plan')
     if isinstance(plan, dict) and isinstance(plan.get('days'), dict):  # a plan Chef made: dates and dish ids only
         out['plan'] = {'kind': 'week' if plan.get('kind') == 'week' else 'day',
-                       'days': {str(d)[:10]: {s: str(v)[:60] for s, v in day.items() if s in planner.SLOTS and isinstance(v, str)}
+                       'days': {str(d)[:10]: {**{s: str(v)[:60] for s, v in day.items() if s in (*planner.SLOTS, 'fastFor', 'festival') and isinstance(v, str)},
+                                              **({'vrat': {s: str(v)[:60] for s, v in day['vrat'].items() if s in planner.SLOTS}} if isinstance(day.get('vrat'), dict) else {})}
                                 for d, day in list(plan['days'].items())[:7] if isinstance(day, dict)}}
     if isinstance(m.get('at'), (int, float)):
         out['at'] = int(m['at'])
@@ -379,10 +381,16 @@ def voter_key(request, raw):
     return 'g:' + raw if raw else ''
 
 
+def dish_facts(id_):
+    """What helps someone choose. (A family's own AI recipes aren't in the recipe book, so they show just their name.)"""
+    r = planner.lookup(id_, catalog.live()['extra'])
+    return {'diet': r['diet'], 'time': r['time'], 'kcal': (r.get('nutrition') or {}).get('kcal')} if r else {}
+
+
 def poll_json(poll, voter=''):
     """One meal's vote: the dishes, how many votes each has, who voted, and what this voter chose."""
     votes = list(poll.votes.order_by('pk').values_list('option_id', 'name', 'voter'))
-    options = [{**o, 'votes': sum(1 for v in votes if v[0] == o['id']), 'voters': [v[1] for v in votes if v[0] == o['id'] and v[1]]}
+    options = [{**o, **dish_facts(o['id']), 'votes': sum(1 for v in votes if v[0] == o['id']), 'voters': [v[1] for v in votes if v[0] == o['id'] and v[1]]}
                for o in poll.options]
     top = max([o['votes'] for o in options] + [0])
     return {'token': poll.token, 'title': poll.title, 'date': poll.date, 'slot': poll.slot, 'options': options,
@@ -438,17 +446,20 @@ def share_base(request):
 def ballot_json(group, voter=''):
     """Every meal of a shared plan. A link to a single older vote works too."""
     polls = list(Poll.objects.filter(group=group).order_by('position')) or [find_poll(group)]
-    return {'group': group, 'meals': [poll_json(p, voter) for p in polls]}
+    return {'group': group, 'note': polls[0].note, 'meals': [poll_json(p, voter) for p in polls]}
 
 
-def open_ballot(request, user, meals):
+LINK_LETTERS = string.ascii_letters + string.digits
+
+
+def open_ballot(request, user, meals, note=''):
     if limited(f'poll:{user.pk}', 30, 3600):
         raise ApiError(429, 'Too many votes started. Please try again later.')
-    group = secrets.token_hex(8)
+    group = ''.join(secrets.choice(LINK_LETTERS) for _ in range(10))  # short, so the one link in the message stays readable
     with transaction.atomic():
         for n, m in enumerate(meals):
             Poll.objects.create(token=secrets.token_hex(16), group=group, position=n, household=user.profile.household,
-                                title=m['title'], date=m['date'], slot=m['slot'], options=m['options'], closes_at=vote_closes(m['date']))
+                                note=note, title=m['title'], date=m['date'], slot=m['slot'], options=m['options'], closes_at=vote_closes(m['date']))
     return {**ballot_json(group), 'shareBase': share_base(request)}
 
 
@@ -474,10 +485,11 @@ def create_ballot(request, body):
             raise ApiError(400, 'Unknown meal.')
         options = clean_options(m.get('options'))
         if len(options) >= 2:
-            meals.append({'title': planner.SLOT_LABEL[m['slot']], 'date': m['date'], 'slot': m['slot'], 'options': options})
+            fast = str(m.get('fast') or '').strip()[:60]  # "Nomulu": everyone fasts that day
+            meals.append({'title': planner.SLOT_LABEL[m['slot']] + (f' ({fast})' if fast else ''), 'date': m['date'], 'slot': m['slot'], 'options': options})
     if not meals:
         raise ApiError(400, 'A vote needs at least two dishes for a meal.')
-    return open_ballot(request, user, meals)
+    return open_ballot(request, user, meals, str(body.get('note') or '').strip()[:200])
 
 
 @endpoint(methods=('GET',))
@@ -511,9 +523,12 @@ def cast_vote(request, body, token):
 def vote_link(request, group, choice=''):
     """The short link in a WhatsApp message. It gives WhatsApp a preview, then opens the voting page in the app.
     Nothing is counted here (WhatsApp itself opens links to preview them): the page casts the vote."""
+    polls = list(Poll.objects.filter(group=group).order_by('position'))
+    count = f'{len(polls)} meals to choose' if len(polls) > 1 else 'Choose your favourite'
     return render(request, 'kitchen/vote_link.html', {
+        'about': (f'{polls[0].note} · ' if polls and polls[0].note else '') + count + '. No account needed.',
         'target': f'/#/vote/{group}' + (f'/{choice}' if choice else ''), 'image': share_base(request) + '/icon-512.png',
-        'title': 'Vote: what should we eat?' if Poll.objects.filter(group=group).exists() else 'This vote was not found'})
+        'title': 'Vote: what should we eat?' if polls else 'This vote was not found'})
 
 
 # ---------------------------------------------------------------- the brain
@@ -543,13 +558,31 @@ def context(body):
             ratings[h['recipeId']] = h['rating']
     ai_recipes = {k: v for k, v in _dict(body.get('aiRecipes')).items() if isinstance(v, dict) and v.get('ingredients')}
     pantry = [p if isinstance(p, dict) else {'id': str(p)} for p in _list(body.get('pantry'))]
+    # Who fasts today decides who can eat what today. (No family added yet? Then it's the one person using the app.)
+    members = [m for m in _list(body.get('members')) if isinstance(m, dict)]
+    today = planner.day_key(None, tz)
+    fast = fasting(body, members, today, today).get(today)
+    if members or fast:
+        members = [{**m, 'fasting': bool(fast) and (fast['all'] or m.get('name') in fast['who'])} for m in members or [{'name': 'Everyone'}]]
     return {
         'pantry': [p for p in pantry if p.get('id')],
-        'members': [m for m in _list(body.get('members')) if isinstance(m, dict)],
+        'members': members,
         'pins': [p for p in _list(body.get('pins')) if isinstance(p, dict) and 'recipeId' in p and 'weekday' in p],
         'log': planner.normalize_log(history, tz), 'ratings': ratings, 'tz': tz,
         'extra_recipes': live['recipes'], 'hidden': live['hidden'], 'extra': {**ai_recipes, **live['extra']},
     }
+
+
+def fasting(body, members, start, today, days=1):
+    """{date: who fasts}, only the days somebody does: weekly fasts, fasting festivals, and what the family chose for a day."""
+    festivals, choices, not_kept = catalog.festivals(), _dict(body.get('fastDays')), [str(x) for x in _list(body.get('notKept'))]
+    dates = [planner.add_days(start, i) for i in range(days)]
+    return {d: f for d in dates if (f := planner.fast_on(d, members, festivals, choices, not_kept, today))}
+
+
+def fast_text(fast):
+    who = 'Everyone is' if fast['all'] else f"{' and '.join(map(str, fast['who']))} {'is' if len(fast['who']) == 1 else 'are'}"
+    return f"{who} fasting today{' for ' + fast['festival'] if fast['festival'] else ''}"
 
 
 def ranked(rows, limit=None):
@@ -591,7 +624,10 @@ def home(request, body):
     """The Cook screen: what to cook now, ranked so recent repeats go down and family goals go up."""
     ctx = context(body)
     today = planner.day_key(None, ctx['tz'])
-    params = dict(pantry=ctx['pantry'], members=ctx['members'], filters=_dict(body.get('filters')), ratings=ctx['ratings'],
+    fast = fasting(body, ctx['members'], today, today).get(today)
+    fasters, usual = planner.split_family(ctx['members'], fast)
+    eating = ctx['members'] if fast and fast['all'] else usual
+    params = dict(pantry=ctx['pantry'], members=eating, filters=_dict(body.get('filters')), ratings=ctx['ratings'],
                   extra_recipes=ctx['extra_recipes'], hidden=ctx['hidden'])
     found = engine.suggest(**params)
 
@@ -599,11 +635,13 @@ def home(request, body):
         out = []
         for r in rows:
             repeat = planner.repeat_check(r['recipe'], ctx['log'], today, ctx['pins'], ctx['extra'])
-            goal = planner.goal_score(r['recipe'], ctx['members'])
+            goal = planner.goal_score(r['recipe'], eating)
             out.append({**r, 'repeat': repeat, 'goalWhy': goal['why'][0] if goal['why'] else None, 'rank': r['score'] - repeat['penalty'] + goal['bonus']})
         return sorted(out, key=lambda r: -r['rank'])
 
-    return {'ready': ranked(rank(found['ready'])), 'almost': ranked(rank(found['almost'])),
+    # On a fasting day: fasting dishes for the people fasting, whatever is in the kitchen.
+    vrat = planner.vrat_ideas(**{**ctx, 'members': fasters, 'filters': _dict(body.get('filters'))}, date=today)[:8] if fast else []
+    return {'fast': fast, 'vrat': ranked(vrat), 'ready': ranked(rank(found['ready'])), 'almost': ranked(rank(found['almost'])),
             'tips': engine.buy_tips(**params), 'prep': planner.prep_tonight(_dict(body.get('plan')), today, ctx['extra']), 'today': today}
 
 
@@ -611,33 +649,63 @@ def home(request, body):
 def plan_week(request, body):
     ctx = context(body)
     start = str(body.get('start') or planner.day_key(None, ctx['tz']))
-    plan = planner.plan_week(start=start, existing=_dict(body.get('existing')), festivals=catalog.festivals(),
-                             observed=_list(body.get('observed')), **ctx)
-    return {'plan': plan}
+    try:
+        days = max(1, min(7, int(body.get('days') or 7)))
+    except (TypeError, ValueError):
+        days = 7
+    if not valid_date(start):
+        raise ApiError(400, 'Unknown day.')
+    fasts = fasting(body, ctx['members'], start, planner.day_key(None, ctx['tz']), days)
+    return {'plan': planner.plan_week(start=start, days=days, existing=_dict(body.get('existing')), fasts=fasts, **ctx)}
 
 
-def slot_options(body):
+@endpoint(limit=STATE)
+def fasts_view(request, body):
+    """Who fasts in the next month and why, with fasting dishes that suit them."""
+    ctx = context(body)
+    today = planner.day_key(None, ctx['tz'])
+    found = fasting(body, ctx['members'], today, today, 31)
+    for date in list(found)[:6]:
+        rows = planner.vrat_ideas(**{**ctx, 'members': planner.split_family(ctx['members'], found[date])[0]}, date=date)
+        found[date] = {**found[date], 'ideas': [r['recipe']['id'] for r in rows[:4]]}
+    return {'fasts': found}
+
+
+def slot_options(ctx, body, date, slot, exclude=(), vrat=False):
     """Dishes that could replace one planned meal, best first. Never anything else planned that week, and never
     a dish already tried for this meal (`exclude`), so swapping keeps finding new ideas instead of bouncing
-    between the same two (dosa, idli, dosa...)."""
-    ctx = context(body)
-    plan, date, slot = _dict(body.get('plan')), str(body.get('date') or ''), body.get('slot')
-    if slot not in planner.SLOTS:
+    between the same two (dosa, idli, dosa...). On a day everyone fasts, and for `vrat` (the meals of the people
+    fasting when others aren't), only fasting dishes."""
+    plan = _dict(body.get('plan'))
+    if slot not in planner.SLOTS or not valid_date(date):
         raise ApiError(400, 'Unknown meal.')
     start = str(body.get('start') or date)
     days = [planner.add_days(start, i) for i in range(7)]
     week = {i for d in days for i in planner.day_recipe_ids(plan.get(d))}
-    tried = {str(x) for x in _list(body.get('exclude'))}
+    tried = {str(x) for x in exclude}
     day_log = ctx['log'] + [{'recipeId': plan[d][s], 'date': d, 'slot': s} for d in days for s in planner.SLOTS
                             if (plan.get(d) or {}).get(s) and not (d == date and s == slot)]
-    rows = planner.recommend(**{**ctx, 'log': day_log}, slot=slot, date=date, fasting_applies=False)
+    fast = fasting(body, ctx['members'], date, planner.day_key(None, ctx['tz'])).get(date)
+    fasters, usual = planner.split_family(ctx['members'], fast)
+    ctx = {**ctx, 'log': day_log}
+    if vrat or (fast and fast['all']):
+        rows = planner.vrat_ideas(**{**ctx, 'members': fasters or ctx['members']}, slot=slot, date=date)
+        new = [r for r in rows if r['recipe']['id'] not in week and r['recipe']['id'] not in tried]
+        # There are fewer fasting dishes, so one from another day may come back, but never from the same day.
+        same_day = set(planner.day_recipe_ids(plan.get(date)))
+        return new or [r for r in rows if r['recipe']['id'] not in same_day and r['recipe']['id'] not in tried]
+    rows = planner.recommend(**{**ctx, 'members': usual}, slot=slot, date=date, fasting_applies=False)
     return [r for r in rows if r['recipe']['id'] not in week and r['recipe']['id'] not in tried]
+
+
+def asked_options(body):
+    return slot_options(context(body), body, str(body.get('date') or ''), body.get('slot'), _list(body.get('exclude')), body.get('vrat') is True)
 
 
 @endpoint(limit=STATE)
 def swap(request, body):
     """Pick a different dish for one meal: the best one not planned this week and not tried already."""
-    rows = slot_options(body)
+    rows = asked_options(body)
     return {'recipeId': rows[0]['recipe']['id'] if rows else None}
 
 
@@ -648,16 +716,41 @@ def alternatives(request, body):
         limit = max(1, min(12, int(body.get('limit') or 6)))
     except (TypeError, ValueError):
         limit = 6
-    rows = slot_options(body)
+    rows = asked_options(body)
     return {'options': [{'id': r['recipe']['id'], 'why': r['why'][:2], 'missing': [engine.name_of(o[0]) for o in r['majorMissing']]}
                         for r in rows[:limit]], 'more': len(rows) > limit}
+
+
+@endpoint(limit=STATE)
+def vote_options(request, body):
+    """What the family can vote on: for each meal, the planned dish and two more that suit everyone (fasting dishes on a fast)."""
+    ctx = context(body)
+    plan, used, out = _dict(body.get('plan')), set(), []
+    for m in _list(body.get('meals'))[:21]:
+        if not isinstance(m, dict):
+            continue
+        date, slot = str(m.get('date') or ''), m.get('slot')
+        rows = slot_options(ctx, body, date, slot, used)[:2]
+        used.update(r['recipe']['id'] for r in rows)
+        planned = planner.lookup(_dict(plan.get(date)).get(slot), ctx['extra'])
+        dishes = ([planned] if planned else []) + [r['recipe'] for r in rows]
+        fast = fasting(body, ctx['members'], date, planner.day_key(None, ctx['tz'])).get(date)
+        label = (fast['festival'] or 'fasting day') if fast and fast['all'] else ''
+        out.append({'date': date, 'slot': slot, 'fast': label, 'options': [{'id': d['id'], 'name': d['name']} for d in dishes]})
+    return {'meals': out}
 
 
 @endpoint(limit=STATE)
 def recommend_view(request, body):
     ctx = context(body)
     slot = body.get('slot') if body.get('slot') in [*planner.SLOTS, 'tiffin'] else None
-    rows = planner.recommend(**ctx, slot=slot, date=body.get('date') or None, fasting_applies=False)
+    today = planner.day_key(None, ctx['tz'])
+    date = body['date'] if valid_date(body.get('date')) else today
+    fast = fasting(body, ctx['members'], date, today).get(date)
+    if fast and fast['all']:
+        rows = planner.vrat_ideas(**ctx, slot=slot, date=date)
+    else:
+        rows = planner.recommend(**ctx, slot=slot, date=date, fasting_applies=False)
     return {'ids': [r['recipe']['id'] for r in rows[:max(1, min(20, int(body.get('limit') or 3)))]]}
 
 
@@ -685,8 +778,12 @@ def recipe_info(request, body):
     recipe = planner.lookup(str(body.get('recipeId') or ''), ctx['extra'])
     if not recipe:
         raise ApiError(404, 'Recipe not found.')
-    house = engine.household_check(recipe, ctx['members'])
+    house = engine.household_check(recipe, [{**m, 'fasting': False} for m in ctx['members']])
     today = planner.day_key(None, ctx['tz'])
+    fast = fasting(body, ctx['members'], today, today).get(today)
+    if fast and house['ok'] and 'vrat' not in recipe['tags']:
+        text = fast_text(fast) + ", and this isn't a fasting (vrat) dish."
+        house = {'ok': False, 'reason': text} if fast['all'] else {**house, 'notes': [text, *house['notes']]}
     return {
         'house': house,
         'plates': planner.plates_for(recipe, ctx['members']) if house['ok'] else [],
@@ -742,7 +839,8 @@ def ai_invent(request, body):
     _ai_allowed(request)
     household = [m for m in _list(body.get('household')) if isinstance(m, dict)]
     diners = [{**m, 'fasting': False} for m in household]
-    args = dict(pantry=_list(body.get('pantry')), household=household, wish=wish, meal=body.get('meal'))
+    fast = body.get('fasting') is True or (bool(household) and all(m.get('fasting') for m in household))  # everyone fasts today
+    args = dict(pantry=_list(body.get('pantry')), household=household, wish=wish, meal=body.get('meal'), fasting=fast)
     avoid = None
     for _attempt in range(2):  # if an invented idea breaks a family rule, ask once more, saying why
         raw = ai.invent_recipe(**args, avoid=avoid)
@@ -751,6 +849,8 @@ def ai_invent(request, body):
         except ValueError as err:
             raise ApiError(502, f'{err}. Please try again.') from err
         house = engine.household_check(recipe, diners)
+        if house['ok'] and fast and 'vrat' not in recipe['tags']:
+            house = {'ok': False, 'reason': "Everyone is fasting today, and this isn't a fasting (vrat) dish"}
         if house['ok']:
             return {'recipe': recipe}
         if recipe.get('requested') or engine.names_dish(wish, recipe['name']):
@@ -781,11 +881,11 @@ def ai_chat(request, body):
     current = planner.lookup(str(body.get('recipeId') or ''), ctx['extra']) if body.get('recipeId') else None
     named = planner.mentioned_recipe(question.lower(), ctx['extra_recipes'], ctx['hidden'])  # "how do I make dal tadka?"
     # "Plan my day" / "plan my week": make a real plan (the Plan tab's rules), which the phone can add with one tap.
-    made = planner.chat_plan(question, plan=_dict(body.get('plan')), festivals=catalog.festivals(),
-                             observed=_list(body.get('observed')), **ctx)
+    today = planner.day_key(None, ctx['tz'])
+    fasts = fasting(body, ctx['members'], today, today, 8)
+    made = planner.chat_plan(question, plan=_dict(body.get('plan')), fasts=fasts, **ctx)
     if made:
         named = None
-    today = planner.day_key(None, ctx['tz'])
 
     def built_in(note=None):
         if made:
@@ -804,7 +904,7 @@ def ai_chat(request, body):
     history = [('assistant' if m.get('from') == 'bot' else 'user', str(m.get('text') or '')[:1500])
                for m in _list(body.get('messages'))[-8:] if isinstance(m, dict) and m.get('text')]
     try:
-        data = ai.chat(question, assistant.context_text(ctx, body, current, named=named, made=made, festivals=catalog.festivals()), history)
+        data = ai.chat(question, assistant.context_text(ctx, body, current, named=named, made=made, festivals=catalog.festivals(), fasts=fasts), history)
     except ApiError as err:
         log.warning('AI chat fell back to the built-in answers: %s', err.message)
         return built_in(err.message)

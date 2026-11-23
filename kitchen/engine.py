@@ -156,6 +156,24 @@ def use_soon(pantry, now=None, within=2):
     return sorted(soon, key=lambda p: p['expiresAt'])
 
 
+# ------------------------------------------------------------------ fasting
+# What most families eat on a fast (phalahar). Customs differ, so this only decides which AI recipes count as vrat dishes.
+VRAT_OK = {'potato', 'sweet_potato', 'pumpkin', 'bottle_gourd', 'raw_banana', 'cucumber', 'tomato', 'lemon', 'green_chilli', 'ginger', 'coriander',
+           'curry_leaves', 'mint', 'banana', 'apple', 'mango', 'papaya', 'milk', 'curd', 'paneer', 'butter', 'ghee', 'cream', 'sabudana', 'samak',
+           'kuttu', 'rajgira', 'singhara', 'makhana', 'peanuts', 'cashew', 'cumin', 'black_pepper', 'cardamom', 'coconut', 'coconut_milk', 'sesame',
+           'sugar', 'jaggery', 'salt', 'oil', 'water'}
+VRAT_FOODS = ('fruit, milk, curd, paneer, ghee, nuts, potato, sweet potato, pumpkin, bottle gourd, raw banana, sabudana, samak rice, kuttu, rajgira, '
+              'singhara, makhana, coconut, jaggery, cumin, black pepper, green chilli, ginger and rock salt '
+              '(no rice, wheat, dals, besan, onion, garlic, egg, meat or packaged masalas)')
+
+
+def vrat_ok(recipe):
+    """Every ingredient is fasting food, and nothing in it is unknown to us (rock salt is)."""
+    return recipe['diet'] == 'veg' and all(
+        all(i in VRAT_OK for i in it['options']) and (not it.get('custom') or 'salt' in it['custom'].lower() or 'namak' in it['custom'].lower())
+        for it in recipe['ingredients'])
+
+
 # ------------------------------------------------------------------ household
 def household_check(recipe, members=()):
     """Can everyone eat this? member: {name, diet, jain, noOnionGarlic, diabetic, fasting, allergies, spice, goals}"""
@@ -426,6 +444,8 @@ def normalize_ai_recipe(raw):
     recipe['createdAt'] = now_ms()  # AI recipes are kept for 6 months unless saved (kitchen/retention.py)
     if raw.get('requested') is True:
         recipe['requested'] = True  # the user asked for this dish by name
+    if vrat_ok(recipe):
+        recipe['tags'].append('vrat')
     return recipe
 
 

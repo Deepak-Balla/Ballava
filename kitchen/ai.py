@@ -311,12 +311,15 @@ def salvage_reply(raw):
 MEALS = ('breakfast', 'lunch', 'dinner', 'snack')
 
 
-def invent_recipe(pantry=(), household=(), wish='', meal=None, avoid=None):
+def invent_recipe(pantry=(), household=(), wish='', meal=None, avoid=None, fasting=False):
     """One new dish. `avoid` is a reason the last attempt was rejected (for example a family rule it broke)."""
     content = (f"Kitchen has: {', '.join(map(str, list(pantry)[:80])) or 'very little'}.\n"
                f"Family rules: {json.dumps(household)[:1500] if household else 'none given'}.\n"
                f"Meal: {meal if meal in MEALS else 'any'}.\n"
                f"Request: {str(wish)[:300] or 'surprise me with something tasty and doable'}.")
+    if fasting:
+        from .engine import VRAT_FOODS
+        content += f"\nEveryone is fasting (vrat) today, so use only fasting foods: {VRAT_FOODS}. (A dish they name is still given exactly.)"
     if avoid:
         content += f'\nYour last idea was rejected because: {avoid}. Make a different dish that follows every family rule.'
     return extract_json(call_ai(invent_system(), content, max_tokens=6000))

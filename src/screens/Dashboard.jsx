@@ -9,7 +9,7 @@ import { t } from '../i18n.js';
 import { firstName } from '../Assistant.jsx';
 import Track from './Track.jsx';
 import { TodayCard, DEMO } from './Home.jsx';
-import { FestivalCard } from '../festivals.jsx';
+import { FestivalCard } from '../fasting.jsx';
 import { VoteResults, ballotOf, useBallots } from '../votes.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -58,7 +58,7 @@ function Welcome(ctx) {
 
       {catalog.announcements.map(a => <div key={a.id} className="note info">📣 {a.text}</div>)}
 
-      <FestivalCard {...ctx} within={30} />
+      <FestivalCard ctx={ctx} within={30} />
       <VoteCards {...ctx} />
 
       {pantry.length === 0 ? (
@@ -73,7 +73,7 @@ function Welcome(ctx) {
         </section>
       ) : (
         <div className="hub-grid">
-          <TodayCard plan={plan} findRecipe={findRecipe} log={log} logMeal={logMeal} notify={notify} />
+          <TodayCard {...ctx} />
           <section className="card quick-card" aria-label="Shortcuts">
             <h3>Shortcuts</h3>
             <div className="quick-grid">

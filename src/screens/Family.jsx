@@ -1,14 +1,23 @@
 import React, { useState } from 'react';
-import { getCatalog, WEEKDAYS } from '../catalog.js';
+import { dayKey, getCatalog, WEEKDAYS } from '../catalog.js';
 import { api } from '../lib.js';
 import { Header, Empty, ingName } from '../ui.jsx';
 import { t } from '../i18n.js';
+import { chosenFor, fastingActions } from '../fasting.jsx';
 
 const ALLERGIES = ['dairy', 'gluten', 'nuts', 'egg', 'seafood'];
-const blank = { name: '', diet: 'nonveg', jain: false, noOnionGarlic: false, diabetic: false, fasting: false, allergies: [], spice: 2, age: 'adult', goals: [], fastWeekdays: [], tiffin: false, likes: [], dislikes: [] };
+const blank = { name: '', diet: 'nonveg', jain: false, noOnionGarlic: false, diabetic: false, allergies: [], spice: 2, age: 'adult', goals: [], fastWeekdays: [], tiffin: false, likes: [], dislikes: [] };
 const toggle = (list, v) => (list.includes(v) ? list.filter(x => x !== v) : [...list, v]);
 
-export default function Family({ members, setMembers, notify }) {
+export default function Family(ctx) {
+  const { members, setMembers, notify } = ctx;
+  const today = dayKey();
+  const fastingToday = chosenFor(today, ctx).who;
+  const fastingNow = m => fastingToday.includes(m.name);
+  function setFasting(m, on) { // just for today
+    const who = members.filter(x => (x === m ? on : fastingNow(x))).map(x => x.name);
+    fastingActions(ctx).choose(today, who.length === members.length ? ['*'] : who);
+  }
   const { goals: GOALS, ageGroups: AGE_GROUPS } = getCatalog();
   const [form, setForm] = useState(blank);
   const [editing, setEditing] = useState(null);
@@ -37,7 +46,7 @@ export default function Family({ members, setMembers, notify }) {
 
   const describe = m => [
     m.diet === 'veg' ? 'Vegetarian' : m.diet === 'egg' ? 'Eggetarian' : 'Eats everything',
-    m.jain && 'Jain', m.noOnionGarlic && 'No onion/garlic', m.diabetic && 'Diabetic', m.fasting && 'Fasting today',
+    m.jain && 'Jain', m.noOnionGarlic && 'No onion/garlic', m.diabetic && 'Diabetic', fastingNow(m) && 'Fasting today',
     m.allergies.length && 'Allergic: ' + m.allergies.join(', '), ['', 'Mild spice', 'Medium spice', 'Loves spice'][m.spice],
     m.age && m.age !== 'adult' && AGE_GROUPS.find(a => a[0] === m.age)?.[1],
     ...(m.goals || []).map(g => GOALS.find(x => x[0] === g)?.[1]), m.tiffin && 'Takes tiffin',
@@ -55,7 +64,7 @@ export default function Family({ members, setMembers, notify }) {
           <div key={i} className="member card">
             <div><b>{m.name}</b><div className="muted small">{describe(m)}</div></div>
             <div className="row">
-              <label className="switch small"><input type="checkbox" checked={m.fasting} onChange={e => setMembers(members.map((x, k) => (k === i ? { ...x, fasting: e.target.checked } : x)))} /> Fasting today</label>
+              <label className="switch small"><input type="checkbox" checked={fastingNow(m)} onChange={e => setFasting(m, e.target.checked)} /> Fasting today</label>
               <button className="btn link" onClick={() => startEdit(m, i)}>Edit</button>
               <button className="btn link danger" onClick={() => setMembers(members.filter((_, k) => k !== i))}>Remove</button>
             </div>
@@ -77,7 +86,6 @@ export default function Family({ members, setMembers, notify }) {
           <label className="check"><input type="checkbox" checked={form.jain} onChange={e => set('jain', e.target.checked)} /> Jain</label>
           <label className="check"><input type="checkbox" checked={form.noOnionGarlic} onChange={e => set('noOnionGarlic', e.target.checked)} /> No onion/garlic</label>
           <label className="check"><input type="checkbox" checked={form.diabetic} onChange={e => set('diabetic', e.target.checked)} /> Diabetic</label>
-          <label className="check"><input type="checkbox" checked={form.fasting} onChange={e => set('fasting', e.target.checked)} /> Fasting today</label>
         </div>
         <fieldset><legend>Allergies</legend>
           <div className="chips wrap">
@@ -102,7 +110,7 @@ export default function Family({ members, setMembers, notify }) {
             {GOALS.map(([id, label]) => <button type="button" key={id} className={'chip' + (form.goals.includes(id) ? ' on' : '')} aria-pressed={form.goals.includes(id)} onClick={() => set('goals', toggle(form.goals, id))}>{label}</button>)}
           </div>
         </fieldset>
-        <fieldset><legend>Fasts every week on</legend>
+        <fieldset><legend>Fasts every week on (those days get fasting dishes)</legend>
           <div className="chips wrap">
             {WEEKDAYS.map((d, i) => <button type="button" key={d} className={'chip' + (form.fastWeekdays.includes(i) ? ' on' : '')} aria-pressed={form.fastWeekdays.includes(i)} onClick={() => set('fastWeekdays', toggle(form.fastWeekdays, i))}>{d}</button>)}
           </div>

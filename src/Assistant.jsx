@@ -179,8 +179,8 @@ function PlanCard({ m, i, ctx, close, update }) {
         const merged = { ...old };
         for (const s of SLOTS) if (day[s] && !locked.includes(s)) merged[s] = day[s]; // your locked meals stay
         if (day.tiffins && Object.keys(day.tiffins).length) merged.tiffins = day.tiffins;
-        if (day.fast && Object.keys(day.fast).length) merged.fast = day.fast;
-        if (day.festival) merged.festival = day.festival;
+        for (const k of ['vrat', 'fastFor', 'festival', 'fast', 'usual']) delete merged[k];
+        for (const k of ['vrat', 'fastFor', 'festival']) if (day[k]) merged[k] = day[k];
         next[date] = merged;
       }
       return next;
@@ -202,6 +202,12 @@ function PlanCard({ m, i, ctx, close, update }) {
                 <span className="muted small">{SLOT_LABEL[s]}</span><span>{r.name}</span>{r.nutrition?.kcal != null && <small className="muted">{r.nutrition.kcal} kcal</small>}
               </button>
             ))}
+            {SLOTS.filter(s => day.vrat?.[s] && findRecipe(day.vrat[s])).map(s => (
+              <button key={'v' + s} className="chat-plan-row" onClick={() => { go('recipe/' + day.vrat[s]); close?.(); }}>
+                <span className="muted small">🪔 {SLOT_LABEL[s]}</span><span>{findRecipe(day.vrat[s]).name}</span><small className="muted">{day.fastFor}</small>
+              </button>
+            ))}
+            {day.fastFor === 'all' && <span className="muted small">🪔 Fasting day{day.festival ? `: ${day.festival}` : ''}</span>}
             {kcal > 0 && <span className="muted small chat-plan-total">≈ {kcal} kcal for the day, one serving each</span>}
           </div>
         );
@@ -278,7 +284,7 @@ export default function Assistant({ screen, param, onClose, ctx }) {
     try {
       const data = await api('ai/chat', {
         ...family, history: family.history.slice(-60), plan, savedDishes, text: q, messages: before, screen, recipeId: recipe?.id,
-        observed: prefs?.observed || [], chefStyle: { length: prefs?.chefLength, language: prefs?.chefLanguage },
+        chefStyle: { length: prefs?.chefLength, language: prefs?.chefLanguage },
       });
       if (data.recipe) setAiRecipes(r => ({ ...r, [data.recipe.id]: data.recipe }));
       chats.add({ from: 'bot', text: data.reply, dishes: data.dishes || [], recipeId: data.recipe?.id, warning: data.recipe?.warning,

@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { Header, ingName } from '../ui.jsx';
 import { api, go } from '../lib.js';
 import PhotoScan from '../PhotoScan.jsx';
+import { dayKey } from '../catalog.js';
+import { isFasting } from '../fasting.jsx';
 
 // Recipe Studio: a simple form for when you know what you want. Type a dish (or nothing), pick a meal, get one full
 // recipe card to cook, save and plan. Ballava Chef (the chat) does the same and more by conversation; this is the
 // one-tap version, plus the fridge-photo scanner.
-export default function AiChef({ aiStatus, refreshAi, pantry, setPantry, members, aiRecipes, setAiRecipes, addToPantry, notify }) {
+export default function AiChef({ aiStatus, refreshAi, pantry, setPantry, members, fasts, aiRecipes, setAiRecipes, addToPantry, notify }) {
   const [wish, setWish] = useState('');
   const [meal, setMeal] = useState('');
   const [busy, setBusy] = useState('');
@@ -36,8 +38,8 @@ export default function AiChef({ aiStatus, refreshAi, pantry, setPantry, members
     try {
       const data = await api('ai/invent', {
         pantry: pantry.map(p => ingName(p.id)),
-        household: members.map(m => ({ diet: m.diet, jain: m.jain, noOnionGarlic: m.noOnionGarlic, diabetic: m.diabetic, fasting: m.fasting, allergies: m.allergies, spice: m.spice, age: m.age, goals: m.goals })),
-        wish, meal,
+        household: members.map(m => ({ diet: m.diet, jain: m.jain, noOnionGarlic: m.noOnionGarlic, diabetic: m.diabetic, fasting: isFasting(fasts?.[dayKey()], m.name), allergies: m.allergies, spice: m.spice, age: m.age, goals: m.goals })),
+        wish, meal, fasting: !!fasts?.[dayKey()]?.all,
       });
       const recipe = data.recipe; // already checked and cleaned by Python (engine.normalize_ai_recipe)
       if (data.fromBook) {

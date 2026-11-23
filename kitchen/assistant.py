@@ -59,7 +59,7 @@ CHEF_LENGTH = {'short': 'Keep answers short: under 80 words unless they ask for 
 CHEF_LANGUAGE = {'en': 'English', 'hi': 'Hindi', 'te': 'Telugu', 'ta': 'Tamil'}
 
 
-def context_text(ctx, body, current=None, now=None, named=None, made=None, festivals=()):
+def context_text(ctx, body, current=None, now=None, named=None, made=None, festivals=(), fasts=None):
     """Everything the AI should know, as plain text. `named` is a recipe-book dish the question names;
     `made` is a plan the app drafted because they asked to plan."""
     tz = ctx['tz']
@@ -89,6 +89,13 @@ def context_text(ctx, body, current=None, now=None, named=None, made=None, festi
     if coming:
         out.append('Festivals coming up: ' + '; '.join(
             f"{f['name']} on {f['date']}{' (a fasting day)' if f['fast'] else ''}" for f in coming[:8]) + '.')
+    if fasts:
+        people = {m.get('name'): f'Person {n}' for n, m in enumerate(ctx['members'][:12], 1)}
+        days = '; '.join(f"{'today' if d == today else d}: {'everyone' if f['all'] else ', '.join(people.get(w, 'someone') for w in f['who'])}"
+                         f"{' (' + f['festival'] + ')' if f['festival'] else ''}" for d, f in list(fasts.items())[:8])
+        out.append(f'FASTING DAYS: {days}. For someone fasting, on those days suggest only dishes tagged vrat, unless they ask for something else. '
+                   f'A new recipe for them may use only {engine.VRAT_FOODS}. Customs differ, so follow what they say about their own fast. '
+                   'People not fasting eat as usual.')
     pantry_ids = [p['id'] for p in ctx['pantry']]
     if named and named is not current:
         missing = [engine.name_of(o[0]) for o in engine.match_recipe(named, pantry_ids)['missing']]
@@ -158,7 +165,7 @@ def plan_from_reply(made, reply, ctx):
         if current and any(n in low for n in planner.recipe_names(current)):
             continue  # the drafted dish is still what Chef says
         near = low.find(slot)
-        fits = sorted((x for x in new if planner.fits_slot(x[1], slot)), key=lambda x: abs(x[0] - near) if near >= 0 else x[0])
+        fits = sorted((x for x in new if planner.fits_slot(x[1], slot) and (day.get('fastFor') != 'all' or 'vrat' in x[1]['tags'])), key=lambda x: abs(x[0] - near) if near >= 0 else x[0])
         if fits:
             wanted[slot] = fits[0][1]['id']
             new.remove(fits[0])
@@ -177,6 +184,8 @@ def adjust_plan(made, wanted, ctx, reply=''):
     diners = [{**m, 'fasting': False} for m in ctx['members']]
     for slot in planner.SLOTS:
         r = planner.lookup(str(wanted.get(slot) or ''), ctx['extra'])
+        if day.get('fastFor') == 'all' and r and 'vrat' not in r['tags']:
+            continue  # everyone fasts that day
         if r and slot not in locked and planner.fits_slot(r, slot) and engine.household_check(r, diners)['ok']:
             day[slot] = r['id']
     return {**made, 'days': {date: day}}

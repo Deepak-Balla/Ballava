@@ -1,10 +1,12 @@
 // 🗳 Sharing a plan on WhatsApp so the family can vote on it.
-// The message has the plan and a link for every dish: tapping one votes for it, with no account needed.
-// (WhatsApp doesn't let other apps create its own polls or read their results, so the votes come to Ballava instead.)
+// The message is short, with one link. The link opens a page with every meal in it, where the family taps their
+// favourites, with no account needed. (WhatsApp doesn't let other apps create its own polls or read their results.)
 // Results show in the app as they come in, and one tap puts the winners in the plan.
 import React, { useEffect, useRef, useState } from 'react';
-import { SLOTS, SLOT_LABEL, WEEKDAYS, addDays, dayKey, slotNow } from './catalog.js';
+import { SLOTS, SLOT_LABEL, addDays, dayKey, slotNow } from './catalog.js';
 import { api, brain, go, whatsappLink } from './lib.js';
+import { dayLabel } from './fasting.jsx';
+import { DietDot } from './ui.jsx';
 
 export function voterId() {
   try {
@@ -17,13 +19,9 @@ export const getBallot = group => api(`ballots/${group}?voter=${voterId()}`);
 export const castVote = (meal, optionId, name) => api(`polls/${meal.token}/vote`, { voter: voterId(), optionId, name });
 export const ballotOf = day => day?.vote || day?.poll?.token || null; // `poll` is a vote started by an older version
 
-export function dayLabel(date, today = dayKey()) {
-  if (date === today) return 'Today';
-  if (date === addDays(today, 1)) return 'Tomorrow';
-  const d = new Date(date + 'T12:00:00');
-  return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${d.toLocaleString('en', { month: 'short' })}`;
-}
-export const mealLabel = meal => (meal.date ? `${SLOT_LABEL[meal.slot] || meal.title}, ${dayLabel(meal.date)}` : meal.title);
+// "Dinner", or "Dinner (Nomulu)" on a day everyone fasts. (Votes from older versions had other titles.)
+export const slotTitle = meal => (meal.title?.startsWith(SLOT_LABEL[meal.slot]) ? meal.title : SLOT_LABEL[meal.slot] || meal.title);
+export const mealLabel = meal => (meal.date ? `${slotTitle(meal)}, ${dayLabel(meal.date)}` : meal.title);
 
 // Links that only work on this computer, or only on the same Wi-Fi.
 export function linkReach(base) {
@@ -35,21 +33,22 @@ export function shareBaseFor(serverBase) {
   return linkReach(location.origin) !== 'anywhere' && serverBase ? serverBase : location.origin;
 }
 
-const KEYCAPS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
-export function voteMessage(ballot, base, findRecipe) {
-  const link = `${base}/v/${ballot.group}`;
-  const count = ballot.meals.reduce((n, m) => n + m.options.length, 0);
-  const direct = count <= 12; // a whole week would be too many links for one message
-  const lines = ['🍽 *What should we eat?*', direct ? 'Tap a link to vote for that dish:' : 'Here is the plan. Tap the link at the end to vote:'];
-  ballot.meals.forEach((m, mi) => {
-    lines.push('', `*${mealLabel(m)}*`);
-    m.options.forEach((o, oi) => {
-      const kcal = findRecipe(o.id)?.nutrition?.kcal;
-      lines.push(`${KEYCAPS[oi] || '•'} ${o.name}${kcal != null ? ` (${kcal} kcal)` : ''}`);
-      if (direct) lines.push(`${link}/${mi}-${oi}`);
-    });
-  });
-  lines.push('', direct ? 'See the votes, or change yours:' : '👉 Vote here:', link);
+const orList = names => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`);
+
+// Short enough to read at a glance: what it's about, the note, and the one link that has everything.
+export function voteMessage(ballot, base) {
+  const { meals, note } = ballot;
+  const days = [...new Set(meals.map(m => m.date))].sort();
+  const lines = ['🍽 *What should we eat?*'];
+  if (note) lines.push(note);
+  if (meals.length <= 3) {
+    for (const m of meals) lines.push(`${mealLabel(m)}: ${orList(m.options.map(o => o.name))}`);
+  } else {
+    const slots = SLOTS.filter(s => meals.some(m => m.slot === s)).map(s => SLOT_LABEL[s].toLowerCase());
+    const span = days.length > 1 ? `${dayLabel(days[0])} to ${dayLabel(days[days.length - 1])}` : dayLabel(days[0]);
+    lines.push(`${meals.length} meals, ${span} (${slots.join(', ')})`);
+  }
+  lines.push('', `👉 Tap to vote: ${base}/v/${ballot.group}`);
   return lines.join('\n');
 }
 
@@ -85,17 +84,21 @@ export function useBallots(groups, onNewVote) {
   return [ballots, update];
 }
 
-/** The meals of one vote, with live results. Tap a dish to vote. */
-export function MealVote({ meal, onVote, heading = true }) {
+/** One meal of a vote, with live results. Tap a dish to vote. */
+export function MealVote({ meal, onVote, title = mealLabel(meal), facts = false }) {
   const most = Math.max(1, ...meal.options.map(o => o.votes));
   return (
     <div className="meal-vote">
-      {heading && <b className="meal-vote-title">{mealLabel(meal)}{meal.closed && <span className="pill">Closed</span>}</b>}
+      {title && <b className="meal-vote-title">{title} {meal.closed && <span className="pill">Closed</span>}</b>}
       {meal.options.map(o => (
         <button key={o.id} className={'vote-option' + (meal.mine === o.id ? ' on' : '')} disabled={meal.closed || !onVote} aria-pressed={meal.mine === o.id} onClick={() => onVote(meal, o.id)}>
           <span className="vote-bar" style={{ width: `${(o.votes / most) * 100}%` }} aria-hidden="true" />
-          <span className="vote-name">{meal.leaders.includes(o.id) ? '🏆 ' : ''}{o.name}{o.voters.length > 0 && <small>{o.voters.join(', ')}</small>}</span>
-          <b>{o.votes}</b>
+          <span className="vote-name">
+            <span>{meal.leaders.includes(o.id) ? '🏆 ' : ''}{o.name}</span>
+            {facts && o.time != null && <small><DietDot diet={o.diet} /> {o.kcal != null ? `${o.kcal} kcal · ` : ''}{o.time} min</small>}
+            {o.voters.length > 0 && <small className="voters">{o.voters.join(', ')}</small>}
+          </span>
+          <b>{meal.mine === o.id && '✓ '}{o.votes}</b>
         </button>
       ))}
     </div>
@@ -141,12 +144,12 @@ export function VoteResults({ ballot, date, ctx, onUpdate }) {
       {meals.length <= 2 ? meals.map(m => <MealVote key={m.token} meal={m} onVote={vote} />) : meals.map(m => (
         <details key={m.token} className="vote-fold">
           <summary><b>{mealLabel(m)}</b> <span className="muted small">{m.total ? `🏆 ${leading(m)} (${m.total} vote${m.total > 1 ? 's' : ''})` : 'No votes yet'}</span></summary>
-          <MealVote meal={m} onVote={vote} heading={false} />
+          <MealVote meal={m} onVote={vote} title="" />
         </details>
       ))}
       <div className="row">
         {total > 0 && <button className="btn sm primary" onClick={applyWinners}>{meals.length > 1 ? 'Use the winners' : 'Use the winner'}</button>}
-        <a className="btn whatsapp sm" href={whatsappLink(voteMessage(ballot, base, findRecipe))} target="_blank" rel="noreferrer">Share vote</a>
+        <a className="btn whatsapp sm" href={whatsappLink(voteMessage(ballot, base))} target="_blank" rel="noreferrer">Share vote</a>
         <button className="btn link sm" onClick={() => setPlan(p => Object.fromEntries(Object.entries(p).map(([d, day]) => {
           if (!meals.some(m => m.date === d)) return [d, day];
           const { vote: _v, poll: _p, ...rest } = day;
@@ -157,72 +160,77 @@ export function VoteResults({ ballot, date, ctx, onUpdate }) {
   );
 }
 
-/** Share a day (or the week) on WhatsApp, with a vote on each meal. */
+/** Choose what to send (days, meals, a note), and share it on WhatsApp as one voting link. */
 export function ShareSheet({ date = null, ctx, onClose }) {
   const { plan, setPlan, family, findRecipe, notify, auth } = ctx;
   const today = dayKey();
-  // A day that already has a vote keeps it, so sharing the week never hides votes that are coming in.
-  const week = Array.from({ length: 7 }, (_, i) => addDays(today, i)).filter(d => plan[d] && !ballotOf(plan[d]));
-  const planned = s => (date ? !!plan[date]?.[s] : week.some(d => plan[d]?.[s]));
-  const still = s => date !== today || SLOTS.indexOf(s) >= SLOTS.indexOf(slotNow()); // not a meal that's over for today
-  const [slots, setSlots] = useState(date ? SLOTS.filter(s => planned(s) && still(s)) : ['dinner']);
+  const planned = (d, s) => !!plan[d]?.[s] && !!findRecipe(plan[d][s]);
+  const still = (d, s) => d !== today || SLOTS.indexOf(s) >= SLOTS.indexOf(slotNow()); // not a meal that's over for today
+  const all = Array.from({ length: 7 }, (_, i) => addDays(today, i)).filter(d => SLOTS.some(s => planned(d, s)));
+  const voted = d => !!ballotOf(plan[d]); // it has a vote already
+  const [days, setDays] = useState(date ? [date] : all.filter(d => !voted(d)));
+  const [slots, setSlots] = useState(date ? SLOTS.filter(s => planned(date, s) && still(date, s)) : ['dinner']);
+  const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(null); // { text, base } once the vote exists
-  const toggle = s => setSlots(x => (x.includes(s) ? x.filter(y => y !== s) : SLOTS.filter(y => y === s || x.includes(y))));
+  const toggle = (list, x, order) => (list.includes(x) ? list.filter(y => y !== x) : order.filter(y => y === x || list.includes(y)));
+  const meals = days.flatMap(d => slots.filter(s => planned(d, s) && still(d, s)).map(s => ({ date: d, slot: s })));
+  const again = days.filter(voted);
 
   async function prepare() {
     setBusy(true);
     try {
-      const wanted = (date ? [date] : week).flatMap(d => slots.filter(s => plan[d]?.[s]).map(s => ({ date: d, slot: s })));
-      const meals = [];
-      const used = []; // so the same alternative isn't offered for two meals
-      for (const m of wanted) {
-        const current = findRecipe(plan[m.date][m.slot]);
-        const { options } = await brain('alternatives', { ...family, plan, date: m.date, slot: m.slot, start: today, exclude: used, limit: 2 });
-        const others = (options || []).map(o => findRecipe(o.id)).filter(Boolean);
-        used.push(...others.map(r => r.id));
-        meals.push({ ...m, options: [current, ...others].filter(Boolean).map(r => ({ id: r.id, name: r.name })) });
-      }
-      const ballot = await api('ballots', { meals });
+      // Python picks the choices: your dish and two more that suit everyone (fasting dishes on a fasting day).
+      const { meals: choices, offline } = await brain('vote-options', { ...family, plan, start: today, meals });
+      if (offline) throw new Error("You're offline. Connect to the internet to share a vote.");
+      const ballot = await api('ballots', { note: note.trim(), meals: choices });
       setPlan(p => {
         const next = { ...p };
-        for (const d of new Set(ballot.meals.map(m => m.date))) next[d] = { ...next[d], vote: ballot.group };
+        for (const d of new Set(ballot.meals.map(m => m.date))) { const { poll: _p, ...day } = next[d] || {}; next[d] = { ...day, vote: ballot.group }; }
         return next;
       });
       const base = shareBaseFor(ballot.shareBase);
-      setReady({ text: voteMessage(ballot, base, findRecipe), base });
+      setReady({ text: voteMessage(ballot, base), base });
     } catch (e) { notify(e.message); }
     setBusy(false);
   }
 
   const reach = ready && linkReach(ready.base);
-  const title = date ? `Share ${dayLabel(date).replace('Today', 'today').replace('Tomorrow', 'tomorrow')}` : 'Share the week';
+  const chip = (key, on, onClick, label) => <button key={key} type="button" className={'chip' + (on ? ' on' : '')} aria-pressed={on} onClick={onClick}>{label}</button>;
   return (
     <div className="sheet" role="dialog" aria-label="Share the plan on WhatsApp" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="sheet-inner swap-picker">
-        <div className="row between"><h3>{title} and vote</h3><button className="icon-btn" onClick={onClose} aria-label="Close">✕</button></div>
+      <div className="sheet-inner swap-picker share-sheet">
+        <div className="row between"><h3>Share on WhatsApp and vote</h3><button className="icon-btn" onClick={onClose} aria-label="Close">✕</button></div>
         {!auth.user ? (
           <>
             <p>Sign in to let your family vote: the votes come back to your account.</p>
             <button className="btn primary" onClick={() => go('account')}>Sign in</button>
           </>
-        ) : !ready && !date && !week.length ? (
-          <p>Every planned day already has a vote. Tap "Share vote" on a day to send it again.</p>
         ) : !ready ? (
           <>
-            <p className="muted small">Which meals should the family vote on? Each gets your planned dish and two more ideas that suit everyone.</p>
-            <div className="chips wrap" role="group" aria-label="Meals to vote on">
-              {SLOTS.filter(planned).map(s => <button key={s} className={'chip' + (slots.includes(s) ? ' on' : '')} aria-pressed={slots.includes(s)} onClick={() => toggle(s)}>{SLOT_LABEL[s]}</button>)}
+            <p className="muted small">Choose what to send. It all goes in one link, with your planned dish and two more ideas for every meal.</p>
+            <b className="small">Days</b>
+            <div className="chips wrap" role="group" aria-label="Days to vote on">
+              {all.map(d => chip(d, days.includes(d), () => setDays(toggle(days, d, all)), `${voted(d) ? '🗳 ' : ''}${dayLabel(d, today)}`))}
             </div>
-            <button className="btn primary big" disabled={busy || !slots.length} onClick={prepare}>{busy ? 'Getting the vote ready…' : 'Make the vote'}</button>
+            <b className="small">Meals</b>
+            <div className="chips wrap" role="group" aria-label="Meals to vote on">
+              {SLOTS.map(s => chip(s, slots.includes(s), () => setSlots(toggle(slots, s, SLOTS)), SLOT_LABEL[s]))}
+            </div>
+            <label className="small share-note">Add a note (optional)
+              <input value={note} maxLength={200} onChange={e => setNote(e.target.value)} placeholder="e.g. Guests on Sunday, choose by tonight!" />
+            </label>
+            {again.length > 0 && <p className="note warn">{again.map(d => dayLabel(d, today)).join(', ')} already {again.length > 1 ? 'have' : 'has'} a vote (🗳). Sharing again starts a new one for {again.length > 1 ? 'those days' : 'that day'}.</p>}
+            <button className="btn primary big" disabled={busy || !meals.length} onClick={prepare}>{busy ? 'Getting the vote ready…' : meals.length ? `Make one link for ${meals.length} meal${meals.length > 1 ? 's' : ''}` : 'Choose at least one meal'}</button>
           </>
         ) : (
           <>
-            <p className="muted small">This is what your family will get. They tap a dish, and the vote shows up in Ballava.</p>
+            <p className="muted small">This is what your family will get. The link opens every meal, and their votes show up in Ballava.</p>
             <pre className="share-preview">{ready.text}</pre>
-            {reach === 'wifi' && <p className="note warn">These links open only on your home Wi-Fi ({ready.base}). For family elsewhere, open Ballava from its https address and share from there (README: "Use Ballava on your phone").</p>}
-            {reach === 'computer' && <p className="note warn">These links open only on this computer. Open Ballava from its Wi-Fi or https address to share it (README: "Use Ballava on your phone").</p>}
+            {reach === 'wifi' && <p className="note warn">This link opens only on your home Wi-Fi ({ready.base}). For family elsewhere, open Ballava from its https address and share from there (README: "Use Ballava on your phone").</p>}
+            {reach === 'computer' && <p className="note warn">This link opens only on this computer. Open Ballava from its Wi-Fi or https address to share it (README: "Use Ballava on your phone").</p>}
             <a className="btn whatsapp big" href={whatsappLink(ready.text)} target="_blank" rel="noreferrer" onClick={onClose}>Send on WhatsApp</a>
+            <button className="btn link" onClick={() => { const link = ready.text.slice(ready.text.lastIndexOf('http')); navigator.clipboard?.writeText(link).then(() => notify('Link copied'), () => notify(link)); }}>Copy just the link</button>
           </>
         )}
       </div>

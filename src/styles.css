@@ -560,6 +560,24 @@ details summary { cursor: pointer; font-weight: 600; margin-top: 8px; }
 .dashboard .vote-box .btn.whatsapp { width: auto; margin-top: 0; }
 .vote-fold { border-top: 1px solid var(--line); padding: 8px 0; }
 .vote-fold summary { cursor: pointer; min-height: 28px; }
+.vote-name .voters { color: var(--green); font-weight: 600; }
+.vote-note { font-style: italic; margin: 4px 0; }
+.vote-page { padding-bottom: 90px; }
+.vote-status { position: fixed; left: 0; right: 0; bottom: 0; display: grid; gap: 2px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: var(--card); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(60, 30, 10, .1); text-align: center; font-size: .92rem; z-index: 5; }
+.share-sheet { display: grid; gap: 8px; }
+.share-sheet p { margin: 0; }
+.share-note { display: grid; gap: 4px; font-weight: 600; }
+.share-note input { min-height: 44px; border: 1.5px solid var(--line); border-radius: 12px; padding: 8px 12px; background: var(--card); font: inherit; font-weight: 400; }
+
+/* 🪔 Fasting */
+.festival-item { border-top: 1px solid var(--line); padding-bottom: 6px; display: grid; gap: 4px; justify-items: start; }
+.festival-item .festival-row { border: 0; width: 100%; }
+.festival-item p { margin: 0; }
+.fast-picker { flex: 1 0 100%; display: grid; gap: 4px; background: var(--amber-soft); border-radius: 12px; padding: 8px 10px; margin: 4px 0 8px; text-align: left; }
+.fast-note { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.vrat-head { margin: 10px 0 0; }
+.day-pills:has(span:empty) { display: none; }
+.day-pills { margin-bottom: 6px; }
 .share-week { width: 100%; margin-top: 10px; }
 .share-preview { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: .88rem; background: var(--green-soft); border-radius: 12px; padding: 12px; margin: 0; max-height: 38vh; overflow: auto; }
 

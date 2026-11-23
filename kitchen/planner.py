@@ -307,7 +307,14 @@ def recommend(pantry=(), members=(), ratings=None, log=(), pins=(), filters=None
         rating = ratings.get(recipe['id'])
         score = (coverage * 60 - len(m['majorMissing']) * 8 + len(m['usesSoon']) * 15 + m['optionalHave']
                  + ((rating - 3) * 6 if rating else 0) + goal['bonus'] - rep['penalty'] + _hash(date + recipe['id']) % 9 + (200 if pin else 0))
+        if 'vrat' in recipe['tags'] and not filters.get('vrat'):
+            if only_vrat:
+                score += 10 if ((recipe.get('nutrition') or {}).get('kcal') or 0) >= 180 else 0  # a meal, not just a side
+            elif not any(m.get('fasting') for m in diners):
+                score -= 20 if slot in ('lunch', 'dinner') else 8
         why = []
+        if only_vrat:
+            why.append('Good for your fast')
         if pin:
             why.append(f'Your {WEEKDAYS[weekday]} favourite')
         if m['usesSoon']:
@@ -322,16 +329,64 @@ def recommend(pantry=(), members=(), ratings=None, log=(), pins=(), filters=None
     return out
 
 
-def fasters_on(date, members=(), festivals=(), observed=()):
-    """Who is fasting on a day: weekly habits plus any festival the family observes."""
-    names = [m['name'] for m in members if weekday_of(date) in (m.get('fastWeekdays') or [])]
-    fest = next((f for f in festivals if f['date'] == date and f.get('fast') and f['id'] in observed), None)
-    return {'names': names, 'festival': fest}
+def keeps_festival_fasts(m):
+    """Small children, and people who are pregnant or diabetic, keep their usual meals unless the family chooses otherwise."""
+    return m.get('age') not in ('toddler', 'child') and not m.get('diabetic') and 'pregnancy' not in (m.get('goals') or [])
 
 
-def plan_week(start=None, days=7, existing=None, log=(), festivals=(), observed=(), members=(), tz=INDIA, **rest):
-    """Plan the week: {'YYYY-MM-DD': {breakfast, lunch, dinner, tiffins: {name: id}, fast: {name: id}, locked: [...]}}.
-    Anything the family locked is kept and never overwritten."""
+def fast_on(date, members=(), festivals=(), choices=None, not_kept=(), today=None):
+    """Who fasts on a day, or None. What the family chose for that day wins (`choices`: {date: ['*'] for everyone, or names,
+    or [] for nobody}). Otherwise it's everyone's weekly fast days, and festivals marked as fasts in the admin portal, except
+    the ones this family doesn't keep (`not_kept`: festival ids)."""
+    names = [m.get('name') for m in members]
+    kept = [f for f in festivals if f['date'] == date and f.get('fast') and f['id'] not in not_kept]
+    chosen = (choices or {}).get(date)
+    if isinstance(chosen, list):
+        everyone = '*' in chosen
+        who = names if everyone else [n for n in names if n in chosen]
+    else:
+        everyone = bool(kept) and not names
+        who = [m.get('name') for m in members if weekday_of(date) in (m.get('fastWeekdays') or [])
+               or (kept and keeps_festival_fasts(m)) or (date == today and m.get('fasting'))]
+    everyone = everyone or (bool(names) and len(who) == len(names))
+    if not who and not everyone:
+        return None
+    return {'all': everyone, 'who': who, 'festival': ' and '.join(f['name'] for f in kept) or None,
+            'key': 'all' if everyone else ', '.join(sorted(map(str, who)))}
+
+
+def split_family(members, fast):
+    """(the people fasting, the people eating as usual)"""
+    if not fast:
+        return [], list(members)
+    fasting = [m for m in members if fast['all'] or m.get('name') in fast['who']]
+    return fasting, [m for m in members if m not in fasting]
+
+
+def main_item(recipe):
+    """The ingredient a dish is built on: samak for Samak Pulao, potato for Vrat Wale Aloo."""
+    return next((it['options'][0] for it in recipe['ingredients'] if not it['optional']), None)
+
+
+def differently(rows, used):
+    """The best dish not built on something already eaten that day (or simply the best), and note what it uses."""
+    pick = next((r for r in rows if main_item(r['recipe']) not in used), rows[0] if rows else None)
+    if pick:
+        used.add(main_item(pick['recipe']))
+    return [pick] if pick else []
+
+
+def vrat_ideas(slot=None, **ctx):
+    """Fasting dishes for a meal, best first. If none made for that meal suit them, any fasting dish."""
+    args = {**ctx, 'only_vrat': True, 'fasting_applies': False}
+    return recommend(**args, slot=slot) or (recommend(**args) if slot else [])
+
+
+def plan_week(start=None, days=7, existing=None, log=(), fasts=None, members=(), tz=INDIA, **rest):
+    """Plan the week: {'YYYY-MM-DD': {breakfast, lunch, dinner, tiffins: {name: id}, locked: [...]}}.
+    `fasts` is {date: fast_on(...)}. When everyone fasts, all three meals are fasting (vrat) dishes. When some do, the others
+    eat as usual and the people fasting get their own `vrat` meals. `fastFor` says who it was planned for.
+    Anything the family locked is kept and never overwritten (a fasting meal is locked as "vrat:lunch")."""
     existing = existing or {}
     start = start or day_key(rest.get('now'), tz)
     plan = {}
@@ -344,17 +399,25 @@ def plan_week(start=None, days=7, existing=None, log=(), festivals=(), observed=
         for s in SLOTS:
             if day.get(s):
                 remember(day[s], date, s)
+            if (day.get('vrat') or {}).get(s):
+                remember(day['vrat'][s], date, 'vrat:' + s)
     for i in range(days):
         date = add_days(start, i)
         old = existing.get(date) or {}
         locked = old.get('locked') or []
-        day = {'locked': locked, 'tiffins': {}, 'fast': {}}
+        day = {'locked': locked, 'tiffins': {}}
+        fast = (fasts or {}).get(date)
+        fasting, usual = split_family(members, fast)
+        mains = set()  # what the fasting dishes of this day are built on
         for slot in SLOTS:
             if slot in locked and old.get(slot):
                 day[slot] = old[slot]
                 continue
             day_log = [e for e in sim if not (e['date'] == date and e['slot'] == slot)]
-            ranked = recommend(**rest, members=members, slot=slot, date=date, log=day_log, fasting_applies=False, tz=tz)
+            if fast and fast['all']:
+                ranked = differently(vrat_ideas(**rest, members=members, slot=slot, date=date, log=day_log, tz=tz), mains)
+            else:
+                ranked = recommend(**rest, members=usual, slot=slot, date=date, log=day_log, fasting_applies=False, tz=tz)
             day[slot] = ranked[0]['recipe']['id'] if ranked else None
             if ranked:
                 remember(ranked[0]['recipe']['id'], date, slot)
@@ -362,21 +425,26 @@ def plan_week(start=None, days=7, existing=None, log=(), festivals=(), observed=
         if 1 <= weekday_of(date) <= 5:
             for kid in (m for m in members if m.get('tiffin')):
                 tiffin_log = [{**e, 'slot': 'tiffin'} for e in sim if e['slot'] == 'tiffin:' + kid['name']]
-                ranked = recommend(**rest, members=[{**kid, 'fasting': False}], slot='tiffin', date=date, log=tiffin_log,
-                                   fasting_applies=False, tz=tz)
+                pick = vrat_ideas if kid in fasting else recommend
+                ranked = pick(**rest, members=[{**kid, 'fasting': False}], slot='tiffin', date=date, log=tiffin_log, tz=tz)
                 if ranked:
                     day['tiffins'][kid['name']] = ranked[0]['recipe']['id']
                     remember(ranked[0]['recipe']['id'], date, 'tiffin:' + kid['name'])
-        # Fasting: a separate vrat meal, so the rest of the family still eats normally.
-        who_fasts = fasters_on(date, members, festivals, observed)
-        for who in (['Family'] if who_fasts['festival'] else who_fasts['names']):
-            pool = list(members) if who == 'Family' else [m for m in members if m['name'] == who]
-            ranked = recommend(**rest, members=pool, slot='lunch', date=date, log=sim, only_vrat=True, fasting_applies=False, tz=tz)
-            if ranked:
-                day['fast'][who] = ranked[0]['recipe']['id']
-                remember(ranked[0]['recipe']['id'], date, 'fast')
-        if who_fasts['festival']:
-            day['festival'] = who_fasts['festival']['name']
+        if fast:
+            day['fastFor'] = fast['key']
+            if fast['festival']:
+                day['festival'] = fast['festival']
+            if not fast['all']:  # fasting meals for the people fasting, so the others still eat as usual
+                day['vrat'] = {}
+                for slot in SLOTS:
+                    if 'vrat:' + slot in locked and (old.get('vrat') or {}).get(slot):
+                        day['vrat'][slot] = old['vrat'][slot]
+                        continue
+                    vrat_log = [e for e in sim if not (e['date'] == date and e['slot'] == 'vrat:' + slot)]
+                    ranked = differently(vrat_ideas(**rest, members=fasting, slot=slot, date=date, log=vrat_log, tz=tz), mains)
+                    if ranked:
+                        day['vrat'][slot] = ranked[0]['recipe']['id']
+                        remember(ranked[0]['recipe']['id'], date, 'vrat:' + slot)
         plan[date] = day
     return plan
 
@@ -398,14 +466,14 @@ def plan_request(text, now=None, tz=INDIA):
     return {'kind': 'day', 'date': add_days(today, 1) if re.search(r'\b(tomorrow|tomorrows|kal)\b', q) else today}
 
 
-def chat_plan(text, plan=None, now=None, festivals=(), observed=(), **ctx):
+def chat_plan(text, plan=None, now=None, fasts=None, **ctx):
     """When someone asks Chef to plan, make the plan the same way the Plan tab does (no repeats, family rules,
     what's in the kitchen, locked meals kept): {'kind', 'days': {date: {breakfast, lunch, dinner, ...}}} or None."""
     req = plan_request(text, now, ctx.get('tz', INDIA))
     if not req:
         return None
     days = 7 if req['kind'] == 'week' else 1
-    made = plan_week(start=req['date'], days=days, existing=plan or {}, festivals=festivals, observed=observed, **ctx)
+    made = plan_week(start=req['date'], days=days, existing=plan or {}, fasts=fasts, **ctx)
     return {'kind': req['kind'], 'days': made}
 
 
@@ -417,13 +485,18 @@ def plan_summary(made, extra=None, today=None):
         meals = [(s, r) for s, r in meals if r]
         kcal = sum((r.get('nutrition') or {}).get('kcal') or 0 for _, r in meals)
         head = 'Today' if date == today else 'Tomorrow' if today and date == add_days(today, 1) else WEEKDAYS[weekday_of(date)] + ' ' + date[8:]
-        lines.append(f"{head}: " + ', '.join(f"{SLOT_LABEL[s].lower()} {r['name']}" for s, r in meals) + (f" (about {kcal} kcal)" if kcal else ''))
+        vrat = [(s, r) for s in SLOTS if (r := lookup((day.get('vrat') or {}).get(s), extra))]
+        if day.get('fastFor') == 'all':
+            head += f" (fasting day{': ' + day['festival'] if day.get('festival') else ''}, all vrat dishes)"
+        lines.append(f"{head}: " + ', '.join(f"{SLOT_LABEL[s].lower()} {r['name']}" for s, r in meals) + (f" (about {kcal} kcal)" if kcal else '')
+                     + (f"; for those fasting: {', '.join(f'{SLOT_LABEL[s].lower()} ' + r['name'] for s, r in vrat)}" if vrat else ''))
     return '\n'.join(lines)
 
 
 def day_recipe_ids(day=None):
     day = day or {}
-    return [i for i in [*(day.get(s) for s in SLOTS), *(day.get('tiffins') or {}).values(), *(day.get('fast') or {}).values()] if i]
+    return [i for i in [*(day.get(s) for s in SLOTS), *(day.get('tiffins') or {}).values(),
+                        *(day.get('vrat') or {}).values(), *(day.get('fast') or {}).values()] if i]  # `fast`: plans made by older versions
 
 
 # ---------------------------------------------------- prep and leftovers
@@ -670,6 +743,8 @@ def menu_message(day, lang='en', members=(), extra=None):
     w = MENU_WORDS.get(lang, MENU_WORDS['en'])
     day = day or {}
     lines, notes = [w['hello'] + ':'], []
+    if day.get('fastFor') == 'all':
+        lines.append('Vrat' + (f" ({day['festival']})" if day.get('festival') else ''))
     for s in SLOTS:
         r = day.get(s) and lookup(day[s], extra)
         if not r:
@@ -679,9 +754,9 @@ def menu_message(day, lang='en', members=(), extra=None):
     for who, id_ in (day.get('tiffins') or {}).items():
         if r := lookup(id_, extra):
             lines.append(f"Tiffin, {who}: {r['name']}")
-    for who, id_ in (day.get('fast') or {}).items():
-        if r := lookup(id_, extra):
-            lines.append(f"Vrat, {who}: {r['name']}")
+    vrat = [f"{w[s]} {r['name']}" for s in SLOTS if (r := lookup((day.get('vrat') or {}).get(s), extra))]
+    if vrat:
+        lines.append(f"Vrat, {day.get('fastFor')}: {', '.join(vrat)}")
     if notes:
         lines.extend(['', w['note'] + ':', *notes[:6]])
     return '\n'.join(lines)
@@ -691,6 +766,9 @@ def menu_message(day, lang='en', members=(), extra=None):
 NUTRITION_WORDS = ('calorie', 'kcal', 'nutrition', 'protein', 'carb', 'fat in', 'fibre', 'fiber', 'healthy')
 HOW_WORDS = ('how do', 'how to', 'how can', 'fix', 'too ', 'sticky', 'salty', 'burnt', 'burned', 'soggy', 'bitter', 'watery', 'mushy',
              'lumpy', 'curdled', 'split', 'sour', 'raw taste', 'went wrong', 'save it', 'rescue')
+
+
+VRAT_ASK = re.compile(r'\b(vrat|vratam|vratham|fasting|upvas|upvaas|upavas|upavasam|ekadashi|phalahar|falahar|farali|nomu|nomulu|(?:on|for|my|our|during) (?:a |the )?fast)\b')
 
 
 DESCRIPTORS = {'punjabi', 'instant', 'quick', 'easy', 'one-pot', 'homestyle', 'home-style', 'simple', 'classic', 'everyday', 'plain',
@@ -714,6 +792,11 @@ def mentioned_recipe(q, extra_recipes=(), hidden=()):
     return best[1] if best else None
 
 
+def _nice_names(people):
+    names = [m.get('name') or 'Someone' for m in people]
+    return names[0] if len(names) == 1 else ', '.join(names[:-1]) + ' and ' + names[-1]
+
+
 def assistant_reply(text, plan=None, now=None, tz=INDIA, current=None, **ctx):
     """The built-in assistant (used when AI is off or busy). It knows the family, the plan, the kitchen and
     the calories of every dish. ctx: pantry, members, ratings, log, pins, extra_recipes, hidden, extra.
@@ -724,6 +807,19 @@ def assistant_reply(text, plan=None, now=None, tz=INDIA, current=None, **ctx):
     today = day_key(now, tz)
     extra = ctx.get('extra')
     name_of = lambda id_: (lookup(id_, extra) or {}).get('name')  # noqa: E731
+    members = ctx.get('members') or []
+    fasting = [m for m in members if m.get('fasting')]
+    usual = [m for m in members if not m.get('fasting')]
+
+    def ideas(slot=None, **over):
+        """Today's ideas: fasting dishes when everyone fasts; otherwise for the people eating as usual."""
+        args = {**ctx, 'date': today, 'now': now, 'tz': tz, **over}
+        if fasting and not usual:
+            return vrat_ideas(slot, **args)
+        return recommend(**{**args, 'members': usual}, slot=slot, fasting_applies=False)
+
+    def vrat_rows(slot=None):
+        return vrat_ideas(slot, **{**ctx, 'members': fasting or members, 'date': today, 'now': now, 'tz': tz})
 
     def dish_lines(rows):
         return '\n'.join(f"{n}. {r['recipe']['name']} ({r['recipe']['time']} min){', ' + r['why'][0].lower() if r['why'] else ''}"
@@ -751,8 +847,7 @@ def assistant_reply(text, plan=None, now=None, tz=INDIA, current=None, **ctx):
     if wants_list:
         protein = asks('protein')
         slot = 'breakfast' if asks('breakfast', 'nashta') else 'lunch' if asks('lunch') else 'dinner' if asks('dinner', 'tonight') else None
-        rows = recommend(**{**ctx, 'filters': {'protein' if protein else 'light': True}}, slot=slot, date=today, now=now,
-                         fasting_applies=False, tz=tz)
+        rows = ideas(slot, filters={'protein' if protein else 'light': True})
         # Protein-rich: most protein for the calories. Light: fewest calories. Both from the family's best matches.
         n = lambda r: r['recipe']['nutrition']  # noqa: E731
         rows = sorted(rows[:12], key=lambda r: -n(r)['protein'] / max(1, n(r)['kcal']) if protein else n(r)['kcal'])[:3]
@@ -780,6 +875,14 @@ def assistant_reply(text, plan=None, now=None, tz=INDIA, current=None, **ctx):
             tips = '\n'.join(f'- {f}' for f in r['fixes'][:4])
             return {'reply': f"{r['title']}:\n{tips}" + (f"\nMyth check: {r['myth']}" if r.get('myth') else '')}
 
+    if VRAT_ASK.search(q) and not named:
+        slot = 'breakfast' if asks('breakfast', 'nashta') else 'lunch' if asks('lunch') else 'dinner' if asks('dinner', 'tonight') else None
+        rows = vrat_rows(slot)[:4]
+        if rows:
+            return {'reply': 'Fasting (vrat) dishes that suit you:\n' + '\n'.join(
+                        f"{n}. {r['recipe']['name']} ({r['recipe']['time']} min)" for n, r in enumerate(rows, 1))
+                    + '\nEvery family keeps a fast a little differently, so skip anything yours avoids.',
+                    'dishes': [r['recipe']['id'] for r in rows]}
     if asks('tomorrow', 'kal'):
         day = plan.get(add_days(today, 1)) or {}
         names = [f'{SLOT_LABEL[s]}: {name_of(day[s])}' for s in SLOTS if day.get(s)]
@@ -797,9 +900,17 @@ def assistant_reply(text, plan=None, now=None, tz=INDIA, current=None, **ctx):
     found = parse_ingredients(q)['found']
     if slot and not found:
         planned = (plan.get(today) or {}).get(slot)
-        rows = recommend(**ctx, slot=slot, date=today, now=now, tz=tz)
+        rows = ideas(slot)
+        if fasting and not usual:
+            return {'reply': f"It's a fasting day, so for {SLOT_LABEL[slot].lower()} I'd suggest:\n{dish_lines(rows)}", 'dishes': [r['recipe']['id'] for r in rows[:3]]}
         head = f'Your plan says {name_of(planned)}. Other good options:' if planned else f'For {SLOT_LABEL[slot].lower()}, I\'d suggest:'
-        return {'reply': f'{head}\n{dish_lines(rows)}', 'dishes': [r['recipe']['id'] for r in rows[:3]]}
+        dishes = [r['recipe']['id'] for r in rows[:3]]
+        tail = ''
+        if fasting:
+            vrat = vrat_rows(slot)[:2]
+            tail = f"\nFor {_nice_names(fasting)} (fasting): {', '.join(r['recipe']['name'] for r in vrat)}" if vrat else ''
+            dishes += [r['recipe']['id'] for r in vrat]
+        return {'reply': f'{head}\n{dish_lines(rows)}{tail}', 'dishes': dishes}
     if found:
         # The things they named, plus what's already in the kitchen. Dishes using more of the named things come first.
         kitchen = [{'id': i} for i in found] + [p for p in ctx.get('pantry') or [] if p.get('id') not in found]

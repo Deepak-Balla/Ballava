@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { useHashRoute, go, api } from './lib.js';
+import { useHashRoute, go, api, useBrain } from './lib.js';
 import { useSynced, startSync, rejoin, wipeDevice } from './sync.js';
 import { setLang, t } from './i18n.js';
 import { defaultExpiry, dayKey, slotNow, getCatalog, setCatalog as storeCatalog, recipeById, hasCatalog } from './catalog.js';
@@ -154,7 +154,19 @@ export default function App() {
   // Older diary entries only have a timestamp; give each a day and a meal for display.
   const log = useMemo(() => history.map(h => ({ ...h, date: h.date || dayKey(h.at), slot: h.slot || slotNow(h.at) })), [history]);
   // What the family knows, sent along whenever the Python brain is asked something.
-  const family = useMemo(() => ({ pantry, members, history, pins, aiRecipes, savedDishes }), [pantry, members, history, pins, aiRecipes, savedDishes]);
+  const family = useMemo(() => ({ pantry, members, history, pins, aiRecipes, savedDishes, fastDays: prefs.fastDays, notKept: prefs.notKept }),
+    [pantry, members, history, pins, aiRecipes, savedDishes, prefs.fastDays, prefs.notKept]);
+  // Who fasts in the next month (weekly fasts, fasting festivals and chosen days), worked out by Python.
+  const fastInfo = useBrain('fasts', { ...family, festivals: catalog.festivals }, auth.checked && hasCatalog() && route[0] !== 'vote');
+  const fasts = fastInfo.data?.fasts || null;
+  // "Fasting today" used to stay ticked for ever. It's now a choice for one day, so yesterday's fast ends by itself.
+  useEffect(() => {
+    const ticked = members.filter(m => m.fasting).map(m => m.name);
+    if (!ticked.length) return;
+    const today = dayKey();
+    setPrefs(p => ({ ...p, fastDays: { ...p.fastDays, [today]: ticked.length === members.length ? ['*'] : ticked } }));
+    setMembers(ms => ms.map(({ fasting: _f, ...m }) => m));
+  }, [members]);
 
   // Returns the ids that were actually new (so messages can be accurate).
   const addToPantry = useCallback((ids) => {
@@ -217,7 +229,7 @@ export default function App() {
 
   const ctx = {
     pantry, setPantry, addToPantry, members, setMembers, shopping, setShopping, addToShopping, history, setHistory, log, logMeal, ratings, aiRecipes, setAiRecipes,
-    filters, setFilters, notify, aiStatus, findRecipe, plan, setPlan, pins, setPins, prefs, setPrefs, catalog, family, auth, loadMe, signedOut,
+    filters, setFilters, notify, aiStatus, findRecipe, plan, setPlan, pins, setPins, prefs, setPrefs, catalog, family, fasts, fastsLoading: fastInfo.loading, auth, loadMe, signedOut,
     savedDishes, isSaved, toggleSave, openAssistant: () => setChatOpen(true), refreshAi,
   };
 

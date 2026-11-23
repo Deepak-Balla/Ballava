@@ -306,6 +306,16 @@ def test_family_member_joins_and_changes_reach_both_phones(page, device, site):
     ravi.context.close()
 
 
+def vrat_names(p):
+    return set(p.evaluate("() => JSON.parse(localStorage.getItem('ballava.catalog')).recipes.filter(r => r.tags.includes('vrat')).map(r => r.name)"))
+
+
+def meals_of(p, day):
+    """The day's three main dishes (not tiffins or the fasting people's own meals)."""
+    return day.evaluate("""d => [...d.querySelectorAll('.plan-row')].filter(r => ['Breakfast', 'Lunch', 'Dinner'].includes(r.querySelector('.plan-slot').textContent))
+      .map(r => [...r.querySelector('.plan-dish').childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim())""")
+
+
 def test_festival_added_by_an_admin_shows_without_a_reload(page, device, site):
     tab(page, 'Dashboard')
     assert page.get_by_text('Nagula Chavithi').count() == 0
@@ -323,16 +333,50 @@ def test_festival_added_by_an_admin_shows_without_a_reload(page, device, site):
     page.get_by_text('Nagula Chavithi').first.wait_for()
     page.get_by_text(re.compile('in 2 days')).wait_for()
     snap(page, '26-dashboard-festival')
+    # It's marked as a fast, so it's kept unless the family says otherwise, with dishes that suit a fast.
+    expect(page.get_by_label('We keep this fast')).to_be_checked()
     tab(page, 'Plan')
-    page.get_by_text('🪔 Nagula Chavithi').wait_for()
-    # Keeping the fast adds a vrat meal to that day only.
-    before = page.locator('.plan-day').first.inner_text()
-    page.get_by_label('We keep this fast').check()
-    page.get_by_text('Vrat · Family').wait_for()
-    assert page.locator('.plan-day').first.inner_text() == before
-    assert 'Vrat · Family' in page.locator('.plan-day', has_text='Nagula Chavithi').inner_text()
-    page.get_by_label('We keep this fast').uncheck()
-    page.get_by_text('Vrat · Family').wait_for(state='detached')
+    plan_day = page.locator('.plan-day', has_text='Nagula Chavithi')
+    plan_day.wait_for()
+    usual = meals_of(page, plan_day)
+    first_day = meals_of(page, page.locator('.plan-day').first)
+    tab(page, 'Dashboard')
+    card = page.locator('.festival-card')
+    card.get_by_text('Children, and people who are pregnant or diabetic').wait_for()  # Riya is a child and Dadaji is diabetic...
+    card.get_by_role('button', name='Dadaji').click()  # ...but Dadaji does keep it
+    card.get_by_text('Fasting dishes that suit you').wait_for()
+    ideas = card.locator('.festival-item > .chips .chip')
+    expect(ideas).to_have_count(4)
+    assert set(ideas.all_inner_texts()) <= vrat_names(page)
+    snap(page, '26-dashboard-festival')
+    tab(page, 'Plan')
+    day = page.locator('.plan-day', has_text='Nagula Chavithi')
+    # That day's plan followed at once, and only that day's. The others keep their meals.
+    day.get_by_text('Vrat · Lunch').wait_for()
+    fasting = [r.strip() for r in day.locator('.plan-row', has_text='Vrat ·').locator('.plan-dish').all_inner_texts()]
+    assert len(fasting) == 3 and all(any(f.startswith(v) for v in vrat_names(page)) for f in fasting), fasting
+    assert meals_of(page, day) == usual, 'the others eat as planned'
+    assert meals_of(page, page.locator('.plan-day').first) == first_day, 'no other day changes'
+    day.scroll_into_view_if_needed()
+    snap(page, '26-plan-some-fasting')
+    # A fasting dish can be changed, for other fasting dishes.
+    day.get_by_label('Swap Vrat · Lunch').click()
+    picker = page.get_by_role('dialog', name=re.compile('Change Fasting Lunch'))
+    picker.locator('.swap-option').first.wait_for()
+    assert all(any(v in o for v in vrat_names(page)) for o in picker.locator('.swap-option').all_inner_texts())
+    picker.locator('.swap-option').nth(1).click()
+    expect(day.get_by_label('Unlock Vrat · Lunch')).to_be_visible()
+    # Everyone fasts: all three meals are fasting dishes. Nobody: the usual meals come back.
+    day.get_by_role('button', name=re.compile('^Fasting:')).click()
+    day.get_by_role('button', name='Everyone', exact=True).click()
+    day.get_by_text('Vrat · Lunch').wait_for(state='detached')
+    assert set(meals_of(page, day)) <= vrat_names(page), meals_of(page, day)
+    snap(page, '26-plan-everyone-fasting')
+    day.get_by_role('button', name='Nobody', exact=True).click()
+    expect(day.locator('.plan-dish').first).to_contain_text(usual[0])
+    assert meals_of(page, day) == usual
+    tab(page, 'Dashboard')
+    expect(page.get_by_label('We keep this fast')).not_to_be_checked()
     # Removing it in the admin portal removes it here too.
     boss.get_by_role('link', name='Nagula Chavithi').first.click()
     boss.locator('a.deletelink').click()
@@ -347,55 +391,96 @@ def whatsapp_text(link):
     return unquote(link.get_attribute('href').split('text=')[1])
 
 
-def test_family_votes_from_the_whatsapp_links(page, device):
+def test_fasting_today_changes_the_cook_screen_and_todays_menu(page):
+    tab(page, 'Cook')
+    page.locator('.today-card').wait_for()
+    before = page.locator('.today-card .plan-dish').all_inner_texts()
+    page.get_by_role('button', name='Fasting: Today').click()
+    page.get_by_role('group', name='Who is fasting: Today').first.get_by_role('button', name='Everyone', exact=True).click()
+    page.get_by_text('Today: fasting dishes for everyone').wait_for()
+    page.get_by_role('heading', name=re.compile('Fasting dishes')).wait_for()
+    names = vrat_names(page)
+    dishes = page.locator('.fast-today .dish-title')
+    dishes.first.wait_for()
+    assert all(d.strip() in names for d in dishes.all_inner_texts())
+    expect(page.get_by_role('heading', name=re.compile('Cook now'))).to_have_count(0)
+    assert set(x.strip() for x in page.locator('.today-card .plan-dish').all_inner_texts()) <= names
+    page.locator('.fast-today').scroll_into_view_if_needed()
+    snap(page, '25-cook-fasting')
+    no_sideways_scroll(page, 'cook on a fasting day')
+    # The Family page has the same switch, per person, just for today.
+    more(page, 'Family')
+    switches = page.get_by_label('Fasting today')
+    expect(switches.first).to_be_checked()
+    for n in range(switches.count()):
+        switches.nth(n).uncheck()
+        expect(switches.nth(n)).not_to_be_checked()
+    tab(page, 'Cook')
+    page.get_by_role('heading', name=re.compile('Cook now')).wait_for()
+    expect(page.locator('.fast-today')).to_have_count(0)
+    assert page.locator('.today-card .plan-dish').all_inner_texts() == before, 'the usual menu is back'
+
+
+def test_family_votes_with_one_whatsapp_link(page, device):
     tab(page, 'Plan')
     page.get_by_role('button', name='Share on WhatsApp and vote', exact=False).first.click()
     sheet = page.get_by_role('dialog', name='Share the plan on WhatsApp')
-    for name, want in (('Breakfast', 'false'), ('Lunch', 'true'), ('Dinner', 'true')):  # (meals already over today start unticked)
+    for name, want in (('Breakfast', 'false'), ('Lunch', 'false'), ('Dinner', 'true')):  # (meals already over today start unticked)
         if sheet.get_by_role('button', name=name).get_attribute('aria-pressed') != want:
             sheet.get_by_role('button', name=name).click()
-    sheet.get_by_role('button', name='Make the vote').click()
+    sheet.get_by_role('button', name='Tomorrow').click()  # today's and tomorrow's dinner, in one link
+    sheet.get_by_label('Add a note').fill('Guests on Sunday!')
+    snap(page, '27-share-choose')
+    sheet.get_by_role('button', name='Make one link for 2 meals').click()
     send = sheet.get_by_role('link', name='Send on WhatsApp')
     send.wait_for()
     snap(page, '27-share-vote')
     text = whatsapp_text(send)
-    assert '*Lunch, Today*' in text and '*Dinner, Today*' in text and 'Breakfast' not in text
-    links = re.findall(r'https?://\S+/v/\w+/\d-\d', text)
-    assert len(links) == 6, text  # two meals, three dishes each
+    links = re.findall(r'https?://\S+', text)
+    assert len(links) == 1 and re.fullmatch(r'https?://\S+/v/\w{10}', links[0]), text
+    assert 'Dinner, Today: ' in text and 'Dinner, Tomorrow: ' in text and 'Guests on Sunday!' in text
+    assert len(text.splitlines()) <= 6, 'short enough to read at a glance'
     send.evaluate("a => a.addEventListener('click', e => e.preventDefault())")
     send.click()
     sheet.wait_for(state='detached')
 
-    # Tapping a dish in the WhatsApp message is the vote. No account, no family data.
+    # The link opens everything that was sent. No account, no family data.
     kid = device()
-    kid.goto(links[4])
-    kid.get_by_text('Your vote for').wait_for()
+    kid.goto(links[0])
+    kid.get_by_text('Guests on Sunday!').wait_for()
+    meals = kid.locator('.meal-vote')
+    expect(meals).to_have_count(2)
+    expect(kid.get_by_role('heading', name='Tomorrow')).to_be_visible()
+    expect(meals.nth(0).locator('.vote-option')).to_have_count(3)
+    expect(meals.nth(0)).to_contain_text('kcal')
     assert kid.get_by_role('navigation', name='Main').count() == 0, 'no family data on the public page'
     kid.get_by_label('Your name').fill('Kabir')
     kid.get_by_role('button', name='Save').click()
-    kid.locator('.vote-name', has_text='Kabir').wait_for()
+    meals.nth(0).locator('.vote-option').nth(1).click()
+    kid.get_by_text('1 of 2 chosen').wait_for()
+    meals.nth(1).locator('.vote-option').nth(0).click()
+    kid.get_by_text('2 of 2 chosen').wait_for()
     snap(kid, '27-vote')
     no_sideways_scroll(kid, 'vote page')
     # It shows up in the app by itself, with who voted.
-    page.get_by_text('1 new family vote').wait_for(timeout=15000)
-    page.locator('.vote-option', has_text='Kabir').wait_for()
+    page.get_by_text(re.compile(r'\d new family vote')).wait_for(timeout=15000)
+    page.locator('.vote-option', has_text='Kabir').first.wait_for()
     snap(page, '27-plan-votes')
 
-    # Changing your mind moves the vote, and a reload doesn't bring the old one back.
-    dinner = kid.locator('.meal-vote').nth(1).locator('.vote-option')
+    # Changing your mind moves the vote, and a reload keeps it.
+    dinner = meals.nth(0).locator('.vote-option')
     dinner.nth(2).click()
-    expect(dinner.nth(2)).to_have_class(re.compile('on'))
+    expect(dinner.nth(2)).to_have_class(re.compile(' on'))
     kid.reload()
-    expect(dinner.nth(2)).to_have_class(re.compile('on'))
+    expect(dinner.nth(2)).to_have_class(re.compile(' on'))
     expect(dinner.nth(1)).not_to_have_class(re.compile(' on'))
-    chosen = dinner.nth(2).locator('.vote-name').evaluate('e => e.firstChild.textContent + (e.childNodes[1]?.nodeType === 3 ? e.childNodes[1].textContent : "")').replace('🏆', '').strip()
+    chosen = dinner.nth(2).locator('.vote-name > span').inner_text().replace('🏆', '').strip()
     kid.context.close()
 
-    # The Dashboard shows the result; one tap puts the winner in the plan and locks it.
+    # The Dashboard shows the result; one tap puts the winners in the plan and locks them.
     tab(page, 'Dashboard')
     card = page.locator('.vote-card')
-    card.locator('.vote-option', has_text='🏆').wait_for()
-    expect(card.locator('.vote-option', has_text='🏆')).to_contain_text(chosen)
+    expect(card.locator('.vote-option', has_text='🏆').first).to_contain_text(chosen)
     card.scroll_into_view_if_needed()
     snap(page, '27-dashboard-votes')
     no_sideways_scroll(page, 'dashboard with votes')
@@ -404,44 +489,62 @@ def test_family_votes_from_the_whatsapp_links(page, device):
     card.wait_for(state='detached')
     tab(page, 'Plan')
     today = page.locator('.plan-day').first
-    expect(today.locator('.plan-row', has_text='Dinner')).to_contain_text(chosen)
+    assert meals_of(page, today)[2] == chosen
     expect(today.get_by_label('Unlock Dinner')).to_be_visible()
 
 
 def test_share_the_whole_week_for_a_vote(page, device):
     tab(page, 'Plan')
+    # One of the days is a fast for everyone: its choices are fasting dishes.
+    fast_day = page.locator('.plan-day').nth(3)
+    fast_day.get_by_role('button', name=re.compile('^Fasting:')).click()
+    fast_day.get_by_role('button', name='Everyone', exact=True).click()
+    expect(fast_day.get_by_role('button', name=re.compile('^Fasting:'))).to_contain_text('Everyone fasts')
+    page.get_by_text(re.compile('fasting dishes for everyone')).wait_for()
+    expect(fast_day.locator('.fast-note')).to_have_count(0)
     page.get_by_role('button', name='Share the week on WhatsApp and vote', exact=False).click()
     sheet = page.get_by_role('dialog', name='Share the plan on WhatsApp')
-    sheet.get_by_role('button', name='Make the vote').click()
+    sheet.get_by_role('button', name='Lunch').click()
+    made = sheet.get_by_role('button', name=re.compile('Make one link for 1[34] meals'))  # (today's lunch may be over)
+    made.click()
     send = sheet.get_by_role('link', name='Send on WhatsApp')
-    send.wait_for()
+    send.wait_for(timeout=30000)
     text = whatsapp_text(send)
-    assert text.count('*Dinner, ') == 7 and len(re.findall(r'https?://', text)) == 1, text
-    link = re.search(r'https?://\S+/v/\w+', text).group(0)
+    links = re.findall(r'https?://\S+', text)
+    assert len(links) == 1 and len(text.splitlines()) <= 4 and 'Today to ' in text and '(lunch, dinner)' in text, text
     sheet.get_by_role('button', name='Close').click()
     kid = device()
-    kid.goto(link)
-    kid.locator('.meal-vote').nth(6).wait_for()
-    for n in range(7):
-        kid.locator('.meal-vote').nth(n).locator('.vote-option').nth(1).click()
-        kid.get_by_text(f'{n + 1} of 7 done').wait_for()
+    kid.goto(links[0])
+    meals = kid.locator('.meal-vote')
+    meals.nth(12).wait_for()
+    names = vrat_names(page)
+    fasts = kid.locator('.card', has_text='Dinner (fasting day)').locator('.vote-name > span').all_inner_texts()
+    assert len(fasts) == 6 and set(fasts) <= names, fasts
+    for n in range(3):
+        meals.nth(n).locator('.vote-option').nth(1).click()
+        kid.get_by_text(re.compile(rf'{n + 1} of 1[34] chosen')).wait_for()
     snap(kid, '27-vote-week')
     kid.context.close()
-    expect(page.locator('.plan-day').first.locator('.vote-option', has_text='🏆')).to_be_visible(timeout=15000)
+    expect(page.locator('.plan-day').first.locator('.vote-option', has_text='🏆').first).to_be_visible(timeout=15000)
     tab(page, 'Dashboard')
-    expect(page.locator('.vote-fold')).to_have_count(7)
-    expect(page.locator('.vote-fold').first).to_contain_text('1 vote')
+    page.locator('.vote-fold', has_text='1 vote').nth(2).wait_for()
     page.locator('.vote-card').scroll_into_view_if_needed()
     snap(page, '27-dashboard-week')
     no_sideways_scroll(page, 'dashboard with a week of votes')
     tab(page, 'Plan')
-    # Every day has a vote now, so sharing the week again points at those instead of starting over.
+    # Every day has a vote now, and choosing one again says it would start over.
     page.get_by_role('button', name='Share the week on WhatsApp and vote', exact=False).click()
-    page.get_by_text('Every planned day already has a vote').wait_for()
+    expect(sheet.get_by_role('button', name='Choose at least one meal')).to_be_disabled()
+    sheet.get_by_role('button', name='Tomorrow').click()
+    sheet.get_by_text('Tomorrow already has a vote').wait_for()
     sheet.get_by_role('button', name='Close').click()
     for _ in range(7):
         page.locator('.vote-box').first.get_by_role('button', name='Remove').click()
     assert page.locator('.vote-box').count() == 0
+    if not fast_day.get_by_role('button', name='Nobody', exact=True).is_visible():
+        fast_day.get_by_role('button', name=re.compile('^Fasting:')).click()
+    fast_day.get_by_role('button', name='Nobody', exact=True).click()
+    expect(fast_day.get_by_role('button', name=re.compile('^Fasting:'))).to_contain_text('Fasting?')
 
 
 def test_old_vote_links_still_work(page, device, site):
@@ -451,6 +554,15 @@ def test_old_vote_links_still_work(page, device, site):
     kid.goto(f'{site}#/vote/{token}')
     kid.locator('.vote-option', has_text='Rajma').click()
     kid.get_by_text('Your vote for').wait_for()
+    kid.context.close()
+    # Messages sent before had a link for every dish: opening one votes for it, and a reload doesn't vote again.
+    kid = device()
+    kid.goto(f'{site}v/{token}/0-0')
+    kid.get_by_text('Your vote for').wait_for()
+    kid.locator('.vote-option', has_text='Rajma').click()
+    expect(kid.locator('.vote-option', has_text='Rajma')).to_have_class(re.compile(' on'))
+    kid.reload()
+    expect(kid.locator('.vote-option', has_text='Rajma')).to_have_class(re.compile(' on'))
     kid.context.close()
 
 

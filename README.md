@@ -5,9 +5,10 @@
 Ballava is a web app that runs in any browser and installs on a phone like a normal app. It:
 
 - **plans the whole week** in one tap, with no repeated dishes, and lets you lock or swap meals
-- **family vote on WhatsApp**: share a day or the week, the family taps a dish to vote, and the results show in the app
+- **family vote on WhatsApp**: one link with the days and meals you choose; the family votes on one page, and the results show in the app
+- **fasting days**: pick a day, a weekly fast or a festival, and the plan, swaps, votes, Cook screen and Chef recommend fasting (vrat) dishes
 - remembers what's in your kitchen and warns you before things spoil
-- suggests dishes from what you already have (103 everyday recipes, mostly Indian)
+- suggests dishes from what you already have (121 everyday recipes, mostly Indian)
 - understands family needs: veg, Jain, no onion or garlic, diabetic, fasting, allergies, spice level, age and health goals
 - **one meal, many plates**: tells you how to adjust one dish for each family member
 - **food diary and dashboard**: logs what you made and spots what's missing, like greens or protein
@@ -100,10 +101,10 @@ Then open **http://localhost:8000** (the app) or **http://localhost:8000/admin**
 
 What the admin portal does:
 - **Dashboard:** numbers at a glance, quick actions, recipes waiting for review, recent changes, and AI use for the last 7 days. The bar under the header jumps to every section.
-- **Recipe book:** *every* recipe in one list, including the 103 built-in ones that live in the code, with search, filters (meal, diet, built-in or added, live, hidden or draft) and calories per serving. Click a dish to see everything about it: ingredients with grams and calories for each line, steps, allergens, Jain and onion/garlic checks. From there, **Edit** (for a built-in dish this starts your own copy), **Hide from users**, or **Open in the app**.
+- **Recipe book:** *every* recipe in one list, including the 121 built-in ones that live in the code, with search, filters (meal, diet, built-in or added, live, hidden or draft) and calories per serving. Click a dish to see everything about it: ingredients with grams and calories for each line, steps, allergens, Jain and onion/garlic checks. From there, **Edit** (for a built-in dish this starts your own copy), **Hide from users**, or **Open in the app**.
 - **Ingredients:** every ingredient with calories, protein, carbs, fat and fibre per 100 g, what a cup or piece weighs, and how many recipes use it. When you add an ingredient, fill in its nutrition so recipes count its calories.
 - **Recipes:** add new ones, or pick **Start from a built-in recipe** to change an existing one. Every edit starts as a *draft*. Select it in the list and use the actions menu: **Send to review**, then **Publish**. Recipes that break the safety rules (for example "gluten-free" with atta, or meat without a food-safety note) can't be published. Users keep seeing the last published version while you edit.
-- **Hidden recipes**, **Ingredients**, **Rescues** (Bachao fixes), **Announcements**, **Festivals**: changes reach users within a minute, even if they have the app open. A festival shows on the Plan tab, and on the Dashboard from 30 days before. A festival whose date has passed is not shown (the list says so).
+- **Hidden recipes**, **Ingredients**, **Rescues** (Bachao fixes), **Announcements**, **Festivals**: changes reach users within a minute, even if they have the app open. A festival shows on the Plan tab, and on the Dashboard from 30 days before. Tick **Fasting day** and families get fasting dishes for it (they can say they don't keep it). A festival whose date has passed is not shown (the list says so).
 - **Audit log:** every change, with who made it and when.
 - **Privacy:** admins see accounts only. Family kitchens, diets, health goals and meal diaries are never shown in the portal.
 
@@ -115,14 +116,14 @@ After 5 wrong admin passwords, that login is locked for 15 minutes.
 .venv\Scripts\python -m pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest
 ```
-This runs **205 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `205 passed`. The tests never call a real AI or use your keys.
+This runs **218 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `218 passed`. The tests never call a real AI or use your keys.
 
 **Real-browser checks (about a minute):**
 ```
 .venv\Scripts\python -m playwright install chromium
 .venv\Scripts\python -m pytest -m e2e
 ```
-This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, share the plan and vote from the WhatsApp links, see a festival an admin just added, and publish a recipe as an admin. It also tries hands-free cooking with a pretend microphone, a fridge photo with a pretend AI, planning a day with Chef, changing a planned meal, the settings (dark theme, colour, text size) and the computer layout. Screenshots go to `test-screenshots/`. You should see `53 passed`.
+This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, share the plan and vote from the WhatsApp link, see a festival an admin just added, fast for a day, and publish a recipe as an admin. It also tries hands-free cooking with a pretend microphone, a fridge photo with a pretend AI, planning a day with Chef, changing a planned meal, the settings (dark theme, colour, text size) and the computer layout. Screenshots go to `test-screenshots/`. You should see `54 passed`.
 
 > The tests switch AI **off** on purpose (so they never use your key or your free limit). That's why the test screenshots say "AI is off"; your own app is not affected.
 
@@ -235,10 +236,10 @@ Everything works this way, including 📷 photos (the phone's camera opens). Two
 ## Family vote on WhatsApp
 
 1. In **Plan**, tap **Share on WhatsApp and vote** under a day, or **Share the week on WhatsApp and vote** at the top. You need to be signed in.
-2. Choose the meals. Each gets your planned dish and two more ideas that suit the whole family.
-3. Tap **Send on WhatsApp** and pick your family group.
+2. Choose the days and meals, and add a note if you like. Each meal gets your planned dish and two more ideas that suit the whole family.
+3. Tap **Make one link**, then **Send on WhatsApp**, and pick your family group.
 
-Everyone in the group taps a dish's link to vote (a whole week has one link). They don't need an account or the app, and can add their name and change their mind. Votes appear in **Plan** and on the **Dashboard** within about 10 seconds. **Use the winners** puts the winning dishes in the plan and locks them; a tie keeps the dish you planned. A vote closes at the end of the day of the meal.
+The message is short, with **one link that has everything you chose**. It opens a page with every meal, day by day, with calories and cooking time; tapping a dish is the vote. Nobody needs an account or the app, and they can add their name and change their mind. Votes appear in **Plan** and on the **Dashboard** within about 10 seconds. **Use the winners** puts the winning dishes in the plan and locks them; a tie keeps the dish you planned. A vote closes at the end of the day of the meal.
 
 Two things to know:
 
@@ -246,6 +247,18 @@ Two things to know:
 - **The links must open on your family's phones.** Links made on `localhost` use your Wi-Fi address instead, and those open only for people on your Wi-Fi. For family elsewhere, open Ballava from an https address (see above) and share from there, or put that address in `.env` as `PUBLIC_URL`. If the address changes, older links stop opening.
 
 Anyone who has the link can vote and see the votes and names, so share it only with your family.
+
+## Fasting days
+
+There are three ways to fast, and all of them change what Ballava recommends for that day:
+
+- **A day you pick:** tap **🪔 Fasting?** on a day in Plan, or on Today's menu, and choose everyone or only some people. (**Fasting today** in Family is the same, and ends by itself tomorrow.)
+- **Every week:** in More → Family, under "Fasts every week on".
+- **A festival an admin marked as a fasting day:** it's kept automatically. Untick **We keep this fast** if your family doesn't. Small children, and people marked pregnant or diabetic, keep their usual meals unless you choose them.
+
+When everyone fasts, breakfast, lunch and dinner are fasting (vrat) dishes; when some do, they get their own three dishes and the others eat as usual. Swapping a meal, the family vote, the Cook screen, groceries, the cook's menu, Recipe Studio and Chef all follow. If a day is already planned, choosing to fast changes that day only, and calling the fast off brings the usual meals back. When a fasting festival is added after you planned, the day shows **Plan fasting meals**, so nothing you planned is replaced without asking.
+
+The 24 fasting dishes use no grains, dals, onion or garlic (sabudana, samak, kuttu, rajgira, makhana, potato, fruit, milk and so on). Families keep fasts differently, so skip what yours avoids. Fasting isn't right for everyone: check with a doctor if you're pregnant, diabetic or on medicine.
 
 ## Your data: kept in your account, for 6 months
 

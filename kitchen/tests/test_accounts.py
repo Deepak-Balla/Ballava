@@ -208,6 +208,22 @@ def test_sharing_a_plan_opens_a_vote_for_every_meal(make_user):
     assert Api().get_json('ballots/nope')[0] == 404
 
 
+def test_one_short_link_holds_everything_that_was_sent(make_user):
+    c = make_user()
+    meals = [{'date': day(n), 'slot': s, 'options': DINNER, 'fast': 'Nomulu' if n == 2 else ''} for n in (1, 2) for s in ('lunch', 'dinner')]
+    made = c.post_json('ballots', {'meals': meals, 'note': '  Guests on Sunday! ' + 'x' * 300})[1]
+    assert len(made['group']) == 10 and made['group'].isalnum()
+    seen = Api().get_json('ballots/' + made['group'])[1]
+    assert seen['note'].startswith('Guests on Sunday!') and len(seen['note']) == 200
+    assert [(m['date'], m['title']) for m in seen['meals']] == [(day(1), 'Lunch'), (day(1), 'Dinner'), (day(2), 'Lunch (Nomulu)'), (day(2), 'Dinner (Nomulu)')]
+    rajma = seen['meals'][0]['options'][0]
+    assert rajma['diet'] == 'veg' and rajma['kcal'] > 0 and rajma['time'] > 0
+    page = Api().get('/v/' + made['group']).content.decode()
+    assert 'Guests on Sunday!' in page and '4 meals to choose' in page
+    script = c.post_json('ballots', {'meals': meals[:1], 'note': '<script>alert(1)</script>'})[1]['group']
+    assert '<script>alert' not in Api().get('/v/' + script).content.decode()
+
+
 def test_votes_from_whatsapp_show_names_leaders_and_ties(make_user):
     c = make_user()
     made = open_ballot(c)

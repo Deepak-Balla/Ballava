@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { SLOTS, SLOT_LABEL, WEEKDAYS, addDays, dayKey, getCatalog } from '../catalog.js';
 import { Header, DietDot, Empty } from '../ui.jsx';
 import { brain, go, useBrain, whatsappLink } from '../lib.js';
-import { FestivalCard, festivalsOn } from '../festivals.jsx';
+import { FastToggle, FestivalCard, fastingActions, fastsText, festivalsOn, planNeedsFast } from '../fasting.jsx';
 import { ShareSheet, VoteResults, ballotOf, useBallots } from '../votes.jsx';
 import { t, LANGS } from '../i18n.js';
 
@@ -19,24 +19,25 @@ const dayIds = day => (day ? [...SLOTS.map(s => day[s]), ...Object.values(day.ti
 
 // Changing one planned meal: a page of ideas from Python (kitchen/api.py -> alternatives), each new page skipping
 // everything already shown, plus a search through the whole recipe book.
-function SwapPicker({ date, slot, today, plan, setPlan, family, findRecipe, catalog, notify, onClose }) {
-  const current = plan[date]?.[slot];
+function SwapPicker({ date, slot, vrat = false, today, plan, setPlan, family, findRecipe, catalog, notify, onClose }) {
+  const current = vrat ? plan[date]?.vrat?.[slot] : plan[date]?.[slot];
   const [seen, setSeen] = useState(current ? [current] : []);
   const [page, setPage] = useState({ loading: true, options: [], more: false });
   const [q, setQ] = useState('');
-  const label = `${t(SLOT_LABEL[slot])} · ${dateLabel(date, today)}`;
+  const label = `${vrat ? 'Fasting ' : ''}${t(SLOT_LABEL[slot])} · ${dateLabel(date, today)}`;
 
   async function load(exclude) {
     setPage(p => ({ ...p, loading: true }));
     try {
-      const r = await brain('alternatives', { ...family, plan, date, slot, start: today, exclude, limit: 6 });
+      const r = await brain('alternatives', { ...family, plan, date, slot, vrat, start: today, exclude, limit: 6 });
       setPage({ loading: false, options: r.options.filter(o => findRecipe(o.id)), more: r.more });
     } catch (e) { notify(e.message); setPage({ loading: false, options: [], more: false }); }
   }
   useEffect(() => { load(seen); }, []);
 
   function choose(id) {
-    setPlan(p => ({ ...p, [date]: { ...p[date], [slot]: id, locked: [...new Set([...(p[date]?.locked || []), slot])] } }));
+    setPlan(p => ({ ...p, [date]: { ...p[date], ...(vrat ? { vrat: { ...p[date]?.vrat, [slot]: id } } : { [slot]: id }),
+      locked: [...new Set([...(p[date]?.locked || []), vrat ? 'vrat:' + slot : slot])] } }));
     notify(`${findRecipe(id)?.name} for ${label.toLowerCase()} (locked, so a refresh keeps it)`);
     onClose();
   }
@@ -92,13 +93,12 @@ function Row({ label, recipe, locked, onLock, onSwap, onCooked, cooked }) {
 }
 
 export default function Plan(ctx) {
-  const { pantry, log, plan, setPlan, pins, setPins, prefs, setPrefs, catalog, family, findRecipe, addToShopping, logMeal, notify } = ctx;
+  const { pantry, log, plan, setPlan, pins, setPins, prefs, setPrefs, catalog, family, fasts, findRecipe, addToShopping, logMeal, notify } = ctx;
   const today = dayKey();
   const [lang, setMenuLang] = useState(prefs.menuLang || 'hi');
   const [busy, setBusy] = useState(false);
   const [sharing, setSharing] = useState(null); // a date, or 'week', while the share sheet is open
   const [changing, setChanging] = useState(null); // { date, slot } while the swap picker is open
-  const observed = prefs.observed || [];
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(today, i)), [today]);
   const planned = days.some(d => dayIds(plan[d]).length > 0);
   // Prep reminders, groceries, the cook's menu and portion tips, all from Python.
@@ -109,7 +109,7 @@ export default function Plan(ctx) {
   async function makePlan() {
     setBusy(true);
     try {
-      const { plan: fresh } = await brain('plan', { ...family, start: today, existing: plan, observed });
+      const { plan: fresh } = await brain('plan', { ...family, start: today, existing: plan });
       // Keep the last 60 days so the dashboard and repeat checks have history.
       const cutoff = addDays(today, -60);
       const kept = Object.fromEntries(Object.entries(plan).filter(([d]) => d >= cutoff && !fresh[d]));
@@ -125,7 +125,7 @@ export default function Plan(ctx) {
     return { ...p, [date]: { ...p[date], locked: locked.includes(slot) ? locked.filter(s => s !== slot) : [...locked, slot] } };
   });
 
-  const swap = (date, slot) => setChanging({ date, slot });
+  const swap = (date, slot, vrat) => setChanging({ date, slot, vrat });
 
   const cookedToday = (id, slot) => log.some(e => e.recipeId === id && e.date === today && e.slot === slot);
 
@@ -161,13 +161,24 @@ export default function Plan(ctx) {
         const canLog = date === today;
         return (
           <section key={date} className="card plan-day">
-            <div className="row between"><h3>{dateLabel(date, today)}</h3><span>{festivalsOn(catalog, date).map(f => <span key={f.id} className="pill warn">🪔 {f.name}</span>)}</span></div>
+            <div className="row between"><h3>{dateLabel(date, today)}</h3><FastToggle date={date} ctx={ctx} /></div>
+            {planNeedsFast(date, ctx) && (
+              <div className="note info fast-note">{fasts[date] ? `${fastsText(fasts[date])} this day${fasts[date].festival ? ` for ${fasts[date].festival}` : ''}.` : 'Nobody fasts this day now.'}{' '}
+                <button className="btn sm primary" onClick={() => fastingActions(ctx).replan(date)}>{fasts[date] ? 'Plan fasting meals' : 'Plan usual meals'}</button></div>
+            )}
+            <div className="day-pills"><span>{festivalsOn(catalog, date).map(f => <span key={f.id} className="pill warn">🪔 {f.name}</span>)}</span></div>
             {SLOTS.map(slot => (
               <Row key={slot} label={t(SLOT_LABEL[slot])} recipe={day[slot] && findRecipe(day[slot])} locked={lock.includes(slot)}
                 onLock={() => toggleLock(date, slot)} onSwap={() => swap(date, slot)} cooked={cookedToday(day[slot], slot)}
                 onCooked={canLog ? () => { const r = findRecipe(day[slot]); logMeal({ recipeId: r.id, name: r.name, date, slot }); notify(`Logged ${r.name}`); } : undefined} />
             ))}
             {Object.entries(day.tiffins || {}).map(([who, id]) => <Row key={'t' + who} label={`Tiffin · ${who}`} recipe={findRecipe(id)} />)}
+            {day.vrat && <p className="muted small vrat-head">🪔 Fasting dishes for {day.fastFor}</p>}
+            {SLOTS.filter(slot => day.vrat?.[slot]).map(slot => (
+              <Row key={'v' + slot} label={`Vrat · ${t(SLOT_LABEL[slot])}`} recipe={findRecipe(day.vrat[slot])} locked={lock.includes('vrat:' + slot)}
+                onLock={() => toggleLock(date, 'vrat:' + slot)} onSwap={() => swap(date, slot, true)} cooked={cookedToday(day.vrat[slot], slot)}
+                onCooked={canLog ? () => { const r = findRecipe(day.vrat[slot]); logMeal({ recipeId: r.id, name: r.name, date, slot }); notify(`Logged ${r.name}`); } : undefined} />
+            ))}
             {Object.entries(day.fast || {}).map(([who, id]) => <Row key={'f' + who} label={`Vrat · ${who}`} recipe={findRecipe(id)} />)}
             {date === today && plateTips > 0 && <p className="muted small">🍽 {plateTips} portion tip{plateTips > 1 ? 's' : ''} today. Open a dish to see who needs what.</p>}
             {ballotOf(day)
@@ -215,7 +226,7 @@ export default function Plan(ctx) {
         </div>
       )}
 
-      <FestivalCard {...ctx} />
+      <FestivalCard ctx={ctx} />
     </div>
   );
 }

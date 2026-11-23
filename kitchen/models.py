@@ -82,6 +82,7 @@ class Poll(models.Model):
     # Meals shared together (a day, or a week of dinners) are one ballot: the same `group`, in `position` order.
     group = models.CharField(max_length=32, blank=True, db_index=True)
     position = models.PositiveSmallIntegerField(default=0)
+    note = models.CharField(max_length=200, blank=True)  # what the sender wants to say, e.g. "Guests on Sunday!"
     household = models.ForeignKey(Household, on_delete=models.CASCADE, related_name='polls')
     title = models.CharField(max_length=100)
     date = models.CharField(max_length=10, blank=True)

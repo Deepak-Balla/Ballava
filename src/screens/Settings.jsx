@@ -106,7 +106,7 @@ export default function Settings({ prefs, setPrefs, filters, setFilters, notify,
         <button className="btn link sm" type="button" onClick={() => go('account')}>Download or delete my data: Account →</button>
       </section>
 
-      <button className="btn ghost" type="button" onClick={() => { setPrefs(old => ({ lang: old.lang, name: old.name, observed: old.observed, menuLang: old.menuLang })); notify('Settings are back to normal.'); }}>Reset settings</button>
+      <button className="btn ghost" type="button" onClick={() => { setPrefs(old => ({ lang: old.lang, name: old.name, fastDays: old.fastDays, notKept: old.notKept, menuLang: old.menuLang })); notify('Settings are back to normal.'); }}>Reset settings</button>
     </div>
   );
 }
