@@ -397,9 +397,24 @@ class AnnouncementAdmin(admin.ModelAdmin):
 
 @admin.register(Festival, site=admin_site)
 class FestivalAdmin(admin.ModelAdmin):
-    list_display = ['name', 'date', 'fast']
+    list_display = ['name', 'date', 'fast', 'users_see']
     list_filter = ['fast']
     date_hierarchy = 'date'
+
+    @admin.display(description='What users see')
+    def users_see(self, obj):
+        left = (obj.date - timezone.localdate()).days
+        if left < 0:
+            return 'Over, so no longer shown'
+        when = 'today' if left == 0 else 'tomorrow' if left == 1 else f'in {left} days'
+        return f'Plan tab and Dashboard ({when})' if left <= 30 else f'Plan tab ({when}); Dashboard 30 days before'
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if obj.date < timezone.localdate():
+            self.message_user(request, f'{obj.name} is dated {obj.date}, which has passed, so users will not see it.', messages.WARNING)
+        else:
+            self.message_user(request, f'Users will see {obj.name} within a minute. Where: {self.users_see(obj)}.')
 
 
 # ---------------------------------------------------------------- people

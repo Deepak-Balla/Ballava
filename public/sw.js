@@ -12,7 +12,7 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/') || url.pathname.includes('admin')) return; // API always live
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/') || url.pathname.startsWith('/v/') || url.pathname.includes('admin')) return; // API always live
   e.respondWith(
     caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
       const copy = res.clone();

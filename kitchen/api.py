@@ -9,15 +9,16 @@ import json
 import logging
 import re
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta
 
+from django.conf import settings
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count
 from django.http import JsonResponse
+from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 
@@ -111,7 +112,8 @@ def new_family_user(name, *, email=None, phone=None, password=None):
 @endpoint(methods=('GET',))
 def health(request, body):
     on = bool(ai.ai_key())
-    return {'ok': True, 'ai': on, 'aiProvider': ai.provider_label() if on else None, 'retentionDays': retention.days(), 'version': '2.2.0'}
+    return {'ok': True, 'ai': on, 'aiProvider': ai.provider_label() if on else None, 'retentionDays': retention.days(),
+            'catalog': catalog.stamp(), 'version': '2.3.0'}  # `catalog` changes whenever admins change something
 
 
 @endpoint(methods=('GET',))
@@ -128,7 +130,6 @@ def config_view(request, body):
 @endpoint()
 def signup(request, body):
     ip = client_ip(request)
-    from django.conf import settings
     if limited('signup:' + ip, settings.SIGNUP_RATE_LIMIT, 3600):
         raise ApiError(429, 'Too many sign-ups from here. Please try again later.')
     name = clean_name(body.get('name'))
@@ -368,51 +369,151 @@ def delete_chats(request, body):
 
 
 # ---------------------------------------------------------------- family vote
-def poll_view(token):
+def voter_key(request, raw):
+    """Who is voting. A signed-in family member is always the same voter, on any device. Anyone else is known by a
+    random id their phone keeps ("g:" in front, so nobody can pretend to be a signed-in person)."""
+    user = app_user(request)
+    if user:
+        return f'u:{user.pk}'
+    raw = str(raw or '').strip()[:60]
+    return 'g:' + raw if raw else ''
+
+
+def poll_json(poll, voter=''):
+    """One meal's vote: the dishes, how many votes each has, who voted, and what this voter chose."""
+    votes = list(poll.votes.order_by('pk').values_list('option_id', 'name', 'voter'))
+    options = [{**o, 'votes': sum(1 for v in votes if v[0] == o['id']), 'voters': [v[1] for v in votes if v[0] == o['id'] and v[1]]}
+               for o in poll.options]
+    top = max([o['votes'] for o in options] + [0])
+    return {'token': poll.token, 'title': poll.title, 'date': poll.date, 'slot': poll.slot, 'options': options,
+            'closed': poll.closes_at < timezone.now(), 'total': len(votes),
+            'leaders': [o['id'] for o in options if top and o['votes'] == top],
+            'mine': next((v[0] for v in votes if voter and v[2] == voter), None)}
+
+
+def find_poll(token):
     poll = Poll.objects.filter(token=token).first()
     if not poll:
         raise ApiError(404, 'This vote was not found.')
-    counts = dict(poll.votes.values_list('option_id').annotate(n=Count('pk')))
-    options = [{**o, 'votes': counts.get(o['id'], 0)} for o in poll.options]
-    return {'title': poll.title, 'date': poll.date, 'slot': poll.slot, 'options': options,
-            'closed': poll.closes_at < timezone.now(), 'total': sum(o['votes'] for o in options)}
+    return poll
+
+
+def clean_options(raw):
+    out = []
+    for o in _list(raw)[:5]:
+        if isinstance(o, dict) and o.get('id') and o.get('name') and str(o['id'])[:40] not in [x['id'] for x in out]:
+            out.append({'id': str(o['id'])[:40], 'name': str(o['name'])[:80]})
+    return out
+
+
+def valid_date(value):
+    try:
+        return datetime.strptime(str(value), '%Y-%m-%d')
+    except ValueError:
+        return None
+
+
+def vote_closes(date):
+    """Voting stays open until the end of the day the meal is for (at least 12 hours from now)."""
+    day = valid_date(date)
+    if not day:
+        return timezone.now() + timedelta(days=3)
+    soonest, latest = timezone.now() + timedelta(hours=12), timezone.now() + timedelta(days=9)
+    return min(max(timezone.make_aware(day + timedelta(days=1)), soonest), latest)
+
+
+def share_base(request):
+    """The address to put in a shared link. `localhost` only opens on this computer, so use PUBLIC_URL, or the first
+    Wi-Fi address in DJANGO_ALLOWED_HOSTS."""
+    if settings.PUBLIC_URL:
+        return settings.PUBLIC_URL
+    host, _, port = request.get_host().partition(':')
+    if host in ('localhost', '127.0.0.1'):
+        lan = next((h for h in settings.ALLOWED_HOSTS if re.fullmatch(r'\d{1,3}(\.\d{1,3}){3}', h) and not h.startswith('127.')), None)
+        if lan:
+            return f'http://{lan}' + (f':{port}' if port else '')
+    return request.build_absolute_uri('/').rstrip('/')
+
+
+def ballot_json(group, voter=''):
+    """Every meal of a shared plan. A link to a single older vote works too."""
+    polls = list(Poll.objects.filter(group=group).order_by('position')) or [find_poll(group)]
+    return {'group': group, 'meals': [poll_json(p, voter) for p in polls]}
+
+
+def open_ballot(request, user, meals):
+    if limited(f'poll:{user.pk}', 30, 3600):
+        raise ApiError(429, 'Too many votes started. Please try again later.')
+    group = secrets.token_hex(8)
+    with transaction.atomic():
+        for n, m in enumerate(meals):
+            Poll.objects.create(token=secrets.token_hex(16), group=group, position=n, household=user.profile.household,
+                                title=m['title'], date=m['date'], slot=m['slot'], options=m['options'], closes_at=vote_closes(m['date']))
+    return {**ballot_json(group), 'shareBase': share_base(request)}
 
 
 @endpoint()
 def create_poll(request, body):
+    """A vote about one meal."""
     user = require_user(request)
-    options = [{'id': str(o.get('id') or '')[:40], 'name': str(o.get('name') or '')[:80]}
-               for o in (body.get('options') if isinstance(body.get('options'), list) else [])[:5] if isinstance(o, dict)]
-    options = [o for o in options if o['id'] and o['name']]
+    options = clean_options(body.get('options'))
     if len(options) < 2:
         raise ApiError(400, 'A vote needs at least two dishes.')
-    if limited(f'poll:{user.pk}', 30, 3600):
-        raise ApiError(429, 'Too many votes started. Please try again later.')
-    poll = Poll.objects.create(token=secrets.token_hex(16), household=user.profile.household,
-                               title=str(body.get('title') or 'What should we eat?')[:100], date=str(body.get('date') or '')[:10],
-                               slot=str(body.get('slot') or 'dinner')[:20], options=options, closes_at=timezone.now() + timedelta(days=3))
-    return {'token': poll.token}
+    made = open_ballot(request, user, [{'title': str(body.get('title') or 'What should we eat?')[:100], 'options': options,
+                                        'date': str(body.get('date') or '')[:10], 'slot': str(body.get('slot') or 'dinner')[:20]}])
+    return {'token': made['meals'][0]['token'], 'group': made['group'], 'shareBase': made['shareBase']}
+
+
+@endpoint()
+def create_ballot(request, body):
+    """Share a plan for voting: {meals: [{date, slot, options: [{id, name}]}]}, for a day or a week."""
+    user = require_user(request)
+    meals = []
+    for m in _list(body.get('meals'))[:21]:
+        if not isinstance(m, dict) or m.get('slot') not in planner.SLOTS or not valid_date(m.get('date')):
+            raise ApiError(400, 'Unknown meal.')
+        options = clean_options(m.get('options'))
+        if len(options) >= 2:
+            meals.append({'title': planner.SLOT_LABEL[m['slot']], 'date': m['date'], 'slot': m['slot'], 'options': options})
+    if not meals:
+        raise ApiError(400, 'A vote needs at least two dishes for a meal.')
+    return open_ballot(request, user, meals)
+
+
+@endpoint(methods=('GET',))
+def get_ballot(request, body, group):
+    return {**ballot_json(group, voter_key(request, request.GET.get('voter'))), 'shareBase': share_base(request)}
 
 
 @endpoint(methods=('GET',))
 def get_poll(request, body, token):
-    return poll_view(token)
+    return poll_json(find_poll(token), voter_key(request, request.GET.get('voter')))
 
 
 @endpoint()
 def cast_vote(request, body, token):
-    if limited('vote:' + client_ip(request), 60, 3600):
+    if limited(f'vote:{token}:{client_ip(request)}', 120, 3600):
         raise ApiError(429, 'Too many votes. Please try again later.')
-    view = poll_view(token)
-    if view['closed']:
+    poll = find_poll(token)
+    if poll.closes_at < timezone.now():
         raise ApiError(410, 'This vote has closed.')
-    voter = str(body.get('voter') or '')[:64]
+    voter = voter_key(request, body.get('voter'))
     if not voter:
         raise ApiError(400, 'Missing voter.')
-    if not any(o['id'] == body.get('optionId') for o in view['options']):
+    if not any(o['id'] == body.get('optionId') for o in poll.options):
         raise ApiError(400, 'Please choose one of the dishes.')
-    Vote.objects.update_or_create(poll_id=token, voter=voter, defaults={'option_id': body['optionId'], 'name': clean_name(body.get('name'))})
-    return poll_view(token)
+    user = app_user(request)
+    name = clean_name(body.get('name')) or (user.first_name if user else '')
+    Vote.objects.update_or_create(poll=poll, voter=voter, defaults={'option_id': body['optionId'], 'name': name})
+    return poll_json(poll, voter)
+
+
+def vote_link(request, group, choice=''):
+    """The short link in a WhatsApp message. It gives WhatsApp a preview, then opens the voting page in the app.
+    Nothing is counted here (WhatsApp itself opens links to preview them): the page casts the vote."""
+    return render(request, 'kitchen/vote_link.html', {
+        'target': f'/#/vote/{group}' + (f'/{choice}' if choice else ''), 'image': share_base(request) + '/icon-512.png',
+        'title': 'Vote: what should we eat?' if Poll.objects.filter(group=group).exists() else 'This vote was not found'})
 
 
 # ---------------------------------------------------------------- the brain
@@ -622,7 +723,6 @@ def ask(request, body):
 
 # ---------------------------------------------------------------- AI Chef
 def _ai_allowed(request):
-    from django.conf import settings
     user = app_user(request)
     who = f'user:{user.pk}' if user else 'ip:' + client_ip(request)
     if limited('ai:' + who, settings.AI_RATE_LIMIT, 60):
@@ -704,7 +804,7 @@ def ai_chat(request, body):
     history = [('assistant' if m.get('from') == 'bot' else 'user', str(m.get('text') or '')[:1500])
                for m in _list(body.get('messages'))[-8:] if isinstance(m, dict) and m.get('text')]
     try:
-        data = ai.chat(question, assistant.context_text(ctx, body, current, named=named, made=made), history)
+        data = ai.chat(question, assistant.context_text(ctx, body, current, named=named, made=made, festivals=catalog.festivals()), history)
     except ApiError as err:
         log.warning('AI chat fell back to the built-in answers: %s', err.message)
         return built_in(err.message)

@@ -1,8 +1,11 @@
 """Tests for the admin portal (/admin): who can get in, what they can see, and publishing content."""
+from datetime import timedelta
+
 import pytest
 from django.contrib.admin.models import LogEntry
 from django.contrib.auth.models import User
 from django.test import Client
+from django.utils import timezone
 
 from kitchen.models import Announcement, Festival, HiddenRecipe, Ingredient, Recipe, Rescue
 from .conftest import ADMIN, Api
@@ -171,6 +174,26 @@ def test_announcements_and_festivals_reach_the_app(admin_client):
     cat = Api().get_json('catalog')[1]
     assert [a['text'] for a in cat['announcements']] == ['New recipes!']
     assert cat['festivals'][0]['name'] == 'Ekadashi' and cat['festivals'][0]['fast'] is True
+
+
+def test_a_new_festival_tells_open_apps_to_refresh(admin_client):
+    stamp = lambda: Api().get_json('health')[1]['catalog']
+    before = stamp()
+    soon = timezone.localdate() + timedelta(days=3)
+    r = admin_client.post('/admin/kitchen/festival/add/', {'name': 'Nagula Chavithi', 'date': soon.isoformat(), 'fast': 'on'}, follow=True)
+    assert b'Users will see Nagula Chavithi within a minute' in r.content and b'in 3 days' in r.content
+    after = stamp()
+    assert after > before, 'apps that are open compare this number and fetch the festivals again'
+    cat = Api().get_json('catalog')[1]
+    assert cat['stamp'] == after and cat['festivals'] == [{'id': str(Festival.objects.get().pk), 'name': 'Nagula Chavithi', 'date': soon.isoformat(), 'fast': True}]
+    Festival.objects.get().delete()
+    assert stamp() > after and Api().get_json('catalog')[1]['festivals'] == []
+
+
+def test_admin_is_warned_about_a_festival_in_the_past(admin_client):
+    past = timezone.localdate() - timedelta(days=2)
+    r = admin_client.post('/admin/kitchen/festival/add/', {'name': 'Dasara', 'date': past.isoformat()}, follow=True)
+    assert b'has passed, so users will not see it' in r.content and b'Over, so no longer shown' in r.content
 
 
 def test_changes_are_in_the_audit_log(admin_client):

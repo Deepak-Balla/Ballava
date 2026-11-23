@@ -1,10 +1,12 @@
 """Real-browser test of the signed-in app: real Chrome, the real Django server and database, several family members.
 Run: pytest -m e2e"""
 import re
+from datetime import timedelta
 from urllib.parse import unquote
 
 import pytest
 from django.contrib.auth.models import User
+from django.utils import timezone
 from playwright.sync_api import expect
 
 from .e2e_helpers import DESKTOP, browser, device, diary, errors, more, no_sideways_scroll, open_chef, site, snap, tab  # noqa: F401
@@ -26,9 +28,11 @@ def page(device, site, settings_module):
 def settings_module(site):
     from django.conf import settings
     settings.OTP_DEV_MODE = True
+    settings.PUBLIC_URL = site.rstrip('/')  # shared links open on this test server
     User.objects.create_superuser(ADMIN['email'], ADMIN['email'], ADMIN['password'])
     yield settings
     settings.OTP_DEV_MODE = False
+    settings.PUBLIC_URL = ''
 
 
 def sign_in(p, site, who=ASHA):
@@ -298,28 +302,156 @@ def test_family_member_joins_and_changes_reach_both_phones(page, device, site):
     for p in (page, ravi):
         for item in ('Carrot', 'Cabbage'):
             p.evaluate("window.dispatchEvent(new Event('focus'))")
-            p.locator('.pantry-list .p-name', has_text=item).wait_for(timeout=15000)
+            p.locator('.pantry-list .p-name', has_text=item).wait_for(timeout=30000)  # phones check again every 20 seconds
     ravi.context.close()
 
 
-def test_family_vote_needs_no_account(page, device):
+def test_festival_added_by_an_admin_shows_without_a_reload(page, device, site):
+    tab(page, 'Dashboard')
+    assert page.get_by_text('Nagula Chavithi').count() == 0
+    boss = device(DESKTOP)
+    admin_sign_in(boss, site)
+    soon = timezone.localdate() + timedelta(days=2)
+    boss.goto(site + 'admin/kitchen/festival/add/')
+    boss.get_by_label('Name').fill('Nagula Chavithi')
+    boss.get_by_label('Date').fill(soon.isoformat())
+    boss.get_by_label('Fast').check()
+    boss.get_by_role('button', name='Save', exact=True).click()
+    boss.get_by_text(re.compile('Users will see Nagula Chavithi')).wait_for()
+    snap(boss, '26-admin-festival')
+    page.evaluate("window.dispatchEvent(new Event('focus'))")  # coming back to the app (it also checks every 30 seconds)
+    page.get_by_text('Nagula Chavithi').first.wait_for()
+    page.get_by_text(re.compile('in 2 days')).wait_for()
+    snap(page, '26-dashboard-festival')
     tab(page, 'Plan')
-    page.get_by_role('button', name=re.compile('Ask the family')).first.click()
-    share = page.get_by_role('link', name='Share vote').first
-    share.wait_for()
-    link = re.search(r'https?://\S+/vote/\S+', unquote(share.get_attribute('href'))).group(0)
+    page.get_by_text('🪔 Nagula Chavithi').wait_for()
+    # Keeping the fast adds a vrat meal to that day only.
+    before = page.locator('.plan-day').first.inner_text()
+    page.get_by_label('We keep this fast').check()
+    page.get_by_text('Vrat · Family').wait_for()
+    assert page.locator('.plan-day').first.inner_text() == before
+    assert 'Vrat · Family' in page.locator('.plan-day', has_text='Nagula Chavithi').inner_text()
+    page.get_by_label('We keep this fast').uncheck()
+    page.get_by_text('Vrat · Family').wait_for(state='detached')
+    # Removing it in the admin portal removes it here too.
+    boss.get_by_role('link', name='Nagula Chavithi').first.click()
+    boss.locator('a.deletelink').click()
+    boss.get_by_role('button', name=re.compile('sure')).click()
+    boss.get_by_text(re.compile('deleted successfully')).wait_for()
+    page.evaluate("window.dispatchEvent(new Event('focus'))")
+    page.get_by_text('Nagula Chavithi').first.wait_for(state='detached')
+    boss.context.close()
+
+
+def whatsapp_text(link):
+    return unquote(link.get_attribute('href').split('text=')[1])
+
+
+def test_family_votes_from_the_whatsapp_links(page, device):
+    tab(page, 'Plan')
+    page.get_by_role('button', name='Share on WhatsApp and vote', exact=False).first.click()
+    sheet = page.get_by_role('dialog', name='Share the plan on WhatsApp')
+    for name, want in (('Breakfast', 'false'), ('Lunch', 'true'), ('Dinner', 'true')):  # (meals already over today start unticked)
+        if sheet.get_by_role('button', name=name).get_attribute('aria-pressed') != want:
+            sheet.get_by_role('button', name=name).click()
+    sheet.get_by_role('button', name='Make the vote').click()
+    send = sheet.get_by_role('link', name='Send on WhatsApp')
+    send.wait_for()
+    snap(page, '27-share-vote')
+    text = whatsapp_text(send)
+    assert '*Lunch, Today*' in text and '*Dinner, Today*' in text and 'Breakfast' not in text
+    links = re.findall(r'https?://\S+/v/\w+/\d-\d', text)
+    assert len(links) == 6, text  # two meals, three dishes each
+    send.evaluate("a => a.addEventListener('click', e => e.preventDefault())")
+    send.click()
+    sheet.wait_for(state='detached')
+
+    # Tapping a dish in the WhatsApp message is the vote. No account, no family data.
+    kid = device()
+    kid.goto(links[4])
+    kid.get_by_text('Your vote for').wait_for()
+    assert kid.get_by_role('navigation', name='Main').count() == 0, 'no family data on the public page'
+    kid.get_by_label('Your name').fill('Kabir')
+    kid.get_by_role('button', name='Save').click()
+    kid.locator('.vote-name', has_text='Kabir').wait_for()
+    snap(kid, '27-vote')
+    no_sideways_scroll(kid, 'vote page')
+    # It shows up in the app by itself, with who voted.
+    page.get_by_text('1 new family vote').wait_for(timeout=15000)
+    page.locator('.vote-option', has_text='Kabir').wait_for()
+    snap(page, '27-plan-votes')
+
+    # Changing your mind moves the vote, and a reload doesn't bring the old one back.
+    dinner = kid.locator('.meal-vote').nth(1).locator('.vote-option')
+    dinner.nth(2).click()
+    expect(dinner.nth(2)).to_have_class(re.compile('on'))
+    kid.reload()
+    expect(dinner.nth(2)).to_have_class(re.compile('on'))
+    expect(dinner.nth(1)).not_to_have_class(re.compile(' on'))
+    chosen = dinner.nth(2).locator('.vote-name').evaluate('e => e.firstChild.textContent + (e.childNodes[1]?.nodeType === 3 ? e.childNodes[1].textContent : "")').replace('🏆', '').strip()
+    kid.context.close()
+
+    # The Dashboard shows the result; one tap puts the winner in the plan and locks it.
+    tab(page, 'Dashboard')
+    card = page.locator('.vote-card')
+    card.locator('.vote-option', has_text='🏆').wait_for()
+    expect(card.locator('.vote-option', has_text='🏆')).to_contain_text(chosen)
+    card.scroll_into_view_if_needed()
+    snap(page, '27-dashboard-votes')
+    no_sideways_scroll(page, 'dashboard with votes')
+    card.get_by_role('button', name='Use the winners').click()
+    page.get_by_text(re.compile('it is!')).wait_for()
+    card.wait_for(state='detached')
+    tab(page, 'Plan')
+    today = page.locator('.plan-day').first
+    expect(today.locator('.plan-row', has_text='Dinner')).to_contain_text(chosen)
+    expect(today.get_by_label('Unlock Dinner')).to_be_visible()
+
+
+def test_share_the_whole_week_for_a_vote(page, device):
+    tab(page, 'Plan')
+    page.get_by_role('button', name='Share the week on WhatsApp and vote', exact=False).click()
+    sheet = page.get_by_role('dialog', name='Share the plan on WhatsApp')
+    sheet.get_by_role('button', name='Make the vote').click()
+    send = sheet.get_by_role('link', name='Send on WhatsApp')
+    send.wait_for()
+    text = whatsapp_text(send)
+    assert text.count('*Dinner, ') == 7 and len(re.findall(r'https?://', text)) == 1, text
+    link = re.search(r'https?://\S+/v/\w+', text).group(0)
+    sheet.get_by_role('button', name='Close').click()
     kid = device()
     kid.goto(link)
-    kid.locator('.vote-option').first.wait_for()
-    snap(kid, '27-vote')
-    kid.locator('.vote-option').nth(1).click()
-    kid.get_by_text('Your vote is in').wait_for()
-    assert kid.get_by_role('navigation', name='Main').count() == 0, 'no family data on the public page'
+    kid.locator('.meal-vote').nth(6).wait_for()
+    for n in range(7):
+        kid.locator('.meal-vote').nth(n).locator('.vote-option').nth(1).click()
+        kid.get_by_text(f'{n + 1} of 7 done').wait_for()
+    snap(kid, '27-vote-week')
     kid.context.close()
-    page.reload()
+    expect(page.locator('.plan-day').first.locator('.vote-option', has_text='🏆')).to_be_visible(timeout=15000)
+    tab(page, 'Dashboard')
+    expect(page.locator('.vote-fold')).to_have_count(7)
+    expect(page.locator('.vote-fold').first).to_contain_text('1 vote')
+    page.locator('.vote-card').scroll_into_view_if_needed()
+    snap(page, '27-dashboard-week')
+    no_sideways_scroll(page, 'dashboard with a week of votes')
     tab(page, 'Plan')
-    page.get_by_role('button', name='Use the winner').first.click()
-    page.get_by_text(re.compile('it is!')).wait_for()
+    # Every day has a vote now, so sharing the week again points at those instead of starting over.
+    page.get_by_role('button', name='Share the week on WhatsApp and vote', exact=False).click()
+    page.get_by_text('Every planned day already has a vote').wait_for()
+    sheet.get_by_role('button', name='Close').click()
+    for _ in range(7):
+        page.locator('.vote-box').first.get_by_role('button', name='Remove').click()
+    assert page.locator('.vote-box').count() == 0
+
+
+def test_old_vote_links_still_work(page, device, site):
+    token = page.evaluate("""async () => (await (await fetch('/api/polls', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '' },
+      body: JSON.stringify({ title: 'Dinner?', options: [{ id: 'chole', name: 'Chole' }, { id: 'rajma_masala', name: 'Rajma' }] }) })).json()).token""")
+    kid = device()
+    kid.goto(f'{site}#/vote/{token}')
+    kid.locator('.vote-option', has_text='Rajma').click()
+    kid.get_by_text('Your vote for').wait_for()
+    kid.context.close()
 
 
 def test_language_switch(page):

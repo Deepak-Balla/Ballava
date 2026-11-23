@@ -4,7 +4,8 @@
 
 Ballava is a web app that runs in any browser and installs on a phone like a normal app. It:
 
-- **plans the whole week** in one tap, with no repeated dishes, and lets you lock, swap or vote on meals
+- **plans the whole week** in one tap, with no repeated dishes, and lets you lock or swap meals
+- **family vote on WhatsApp**: share a day or the week, the family taps a dish to vote, and the results show in the app
 - remembers what's in your kitchen and warns you before things spoil
 - suggests dishes from what you already have (103 everyday recipes, mostly Indian)
 - understands family needs: veg, Jain, no onion or garlic, diabetic, fasting, allergies, spice level, age and health goals
@@ -102,7 +103,7 @@ What the admin portal does:
 - **Recipe book:** *every* recipe in one list, including the 103 built-in ones that live in the code, with search, filters (meal, diet, built-in or added, live, hidden or draft) and calories per serving. Click a dish to see everything about it: ingredients with grams and calories for each line, steps, allergens, Jain and onion/garlic checks. From there, **Edit** (for a built-in dish this starts your own copy), **Hide from users**, or **Open in the app**.
 - **Ingredients:** every ingredient with calories, protein, carbs, fat and fibre per 100 g, what a cup or piece weighs, and how many recipes use it. When you add an ingredient, fill in its nutrition so recipes count its calories.
 - **Recipes:** add new ones, or pick **Start from a built-in recipe** to change an existing one. Every edit starts as a *draft*. Select it in the list and use the actions menu: **Send to review**, then **Publish**. Recipes that break the safety rules (for example "gluten-free" with atta, or meat without a food-safety note) can't be published. Users keep seeing the last published version while you edit.
-- **Hidden recipes**, **Ingredients**, **Rescues** (Bachao fixes), **Announcements**, **Festivals**: changes reach users straight away.
+- **Hidden recipes**, **Ingredients**, **Rescues** (Bachao fixes), **Announcements**, **Festivals**: changes reach users within a minute, even if they have the app open. A festival shows on the Plan tab, and on the Dashboard from 30 days before. A festival whose date has passed is not shown (the list says so).
 - **Audit log:** every change, with who made it and when.
 - **Privacy:** admins see accounts only. Family kitchens, diets, health goals and meal diaries are never shown in the portal.
 
@@ -114,14 +115,14 @@ After 5 wrong admin passwords, that login is locked for 15 minutes.
 .venv\Scripts\python -m pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest
 ```
-This runs **197 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `197 passed`. The tests never call a real AI or use your keys.
+This runs **205 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `205 passed`. The tests never call a real AI or use your keys.
 
 **Real-browser checks (about a minute):**
 ```
 .venv\Scripts\python -m playwright install chromium
 .venv\Scripts\python -m pytest -m e2e
 ```
-This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, vote, and publish a recipe as an admin. It also tries hands-free cooking with a pretend microphone, a fridge photo with a pretend AI, planning a day with Chef, changing a planned meal, the settings (dark theme, colour, text size) and the computer layout. Screenshots go to `test-screenshots/`. You should see `50 passed`.
+This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, share the plan and vote from the WhatsApp links, see a festival an admin just added, and publish a recipe as an admin. It also tries hands-free cooking with a pretend microphone, a fridge photo with a pretend AI, planning a day with Chef, changing a planned meal, the settings (dark theme, colour, text size) and the computer layout. Screenshots go to `test-screenshots/`. You should see `53 passed`.
 
 > The tests switch AI **off** on purpose (so they never use your key or your free limit). That's why the test screenshots say "AI is off"; your own app is not affected.
 
@@ -230,6 +231,21 @@ Everything works this way, including 📷 photos (the phone's camera opens). Two
 4. Press **Ctrl + C** to stop it. The address changes each time. While it runs, anyone with the address can reach your sign-in page, so share it only with family. (`.env` already allows these addresses.)
 
 **C. Always on, for the whole family:** put it online (step 10) and you get a permanent https address.
+
+## Family vote on WhatsApp
+
+1. In **Plan**, tap **Share on WhatsApp and vote** under a day, or **Share the week on WhatsApp and vote** at the top. You need to be signed in.
+2. Choose the meals. Each gets your planned dish and two more ideas that suit the whole family.
+3. Tap **Send on WhatsApp** and pick your family group.
+
+Everyone in the group taps a dish's link to vote (a whole week has one link). They don't need an account or the app, and can add their name and change their mind. Votes appear in **Plan** and on the **Dashboard** within about 10 seconds. **Use the winners** puts the winning dishes in the plan and locks them; a tie keeps the dish you planned. A vote closes at the end of the day of the meal.
+
+Two things to know:
+
+- **This is Ballava's own vote, not WhatsApp's poll feature.** WhatsApp's share links can only fill in a message, so a website can't create a WhatsApp poll or read its result.
+- **The links must open on your family's phones.** Links made on `localhost` use your Wi-Fi address instead, and those open only for people on your Wi-Fi. For family elsewhere, open Ballava from an https address (see above) and share from there, or put that address in `.env` as `PUBLIC_URL`. If the address changes, older links stop opening.
+
+Anyone who has the link can vote and see the votes and names, so share it only with your family.
 
 ## Your data: kept in your account, for 6 months
 

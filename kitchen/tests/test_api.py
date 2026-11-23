@@ -16,7 +16,9 @@ pytestmark = pytest.mark.django_db
 
 def test_health(api, monkeypatch):
     monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
-    assert api.get_json('health') == (200, {'ok': True, 'ai': False, 'aiProvider': None, 'retentionDays': 180, 'version': '2.2.0'})
+    status, health = api.get_json('health')
+    assert status == 200 and isinstance(health.pop('catalog'), int)
+    assert health == {'ok': True, 'ai': False, 'aiProvider': None, 'retentionDays': 180, 'version': '2.3.0'}
 
 
 def test_serves_the_app_at_the_root(api, settings, tmp_path):

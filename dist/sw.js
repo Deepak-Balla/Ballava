@@ -1,6 +1,6 @@
 // Ballava service worker: lets the app open even with no internet.
-const CACHE = 'ballava-mwqc3okt';
-const SHELL = ['./', 'index.html', 'app.js?v=mwqc3okt', 'app.css?v=mwqc3okt', 'manifest.webmanifest', 'icon.svg', 'icon-192.png'];
+const CACHE = 'ballava-mwt8rakr';
+const SHELL = ['./', 'index.html', 'app.js?v=mwt8rakr', 'app.css?v=mwt8rakr', 'manifest.webmanifest', 'icon.svg', 'icon-192.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -12,7 +12,7 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/') || url.pathname.includes('admin')) return; // API always live
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/') || url.pathname.startsWith('/v/') || url.pathname.includes('admin')) return; // API always live
   e.respondWith(
     caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
       const copy = res.clone();

@@ -23,6 +23,8 @@ urlpatterns = [
     path('chats', api.chats),
     path('chats/delete', api.delete_chats),
     path('polls', api.create_poll),
+    path('ballots', api.create_ballot),
+    path('ballots/<str:group>', api.get_ballot),
     path('polls/<str:token>', api.get_poll),
     path('polls/<str:token>/vote', api.cast_vote),
     # the brain

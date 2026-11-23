@@ -9,6 +9,8 @@ import { t } from '../i18n.js';
 import { firstName } from '../Assistant.jsx';
 import Track from './Track.jsx';
 import { TodayCard, DEMO } from './Home.jsx';
+import { FestivalCard } from '../festivals.jsx';
+import { VoteResults, ballotOf, useBallots } from '../votes.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const LONG_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -20,8 +22,17 @@ function greeting(hour) {
   return ['Good evening', "Dinner plans? Here's your kitchen tonight."];
 }
 
+// Votes the family is casting right now, from plans shared on WhatsApp.
+function VoteCards(ctx) {
+  const today = dayKey();
+  const groups = [...new Set(Object.entries(ctx.plan).filter(([d]) => d >= today).map(([, day]) => ballotOf(day)).filter(Boolean))];
+  const [ballots, update] = useBallots(groups, n => ctx.notify(`🗳 ${n} new family vote${n > 1 ? 's' : ''}`));
+  return groups.map(g => ballots[g] && <section key={g} className="card vote-card"><VoteResults ballot={ballots[g]} ctx={ctx} onUpdate={update} /></section>);
+}
+
 // Greeting by name, today's menu, shortcuts and what to use up: the first thing you see.
-function Welcome({ auth, prefs, setPrefs, pantry, shopping, savedDishes, plan, findRecipe, log, logMeal, notify, openAssistant, addToPantry, catalog }) {
+function Welcome(ctx) {
+  const { auth, prefs, setPrefs, pantry, shopping, savedDishes, plan, findRecipe, log, logMeal, notify, openAssistant, addToPantry, catalog } = ctx;
   const now = new Date();
   const [hi, line] = greeting(now.getHours());
   const name = firstName(auth, prefs);
@@ -46,6 +57,9 @@ function Welcome({ auth, prefs, setPrefs, pantry, shopping, savedDishes, plan, f
       </header>
 
       {catalog.announcements.map(a => <div key={a.id} className="note info">📣 {a.text}</div>)}
+
+      <FestivalCard {...ctx} within={30} />
+      <VoteCards {...ctx} />
 
       {pantry.length === 0 ? (
         <section className="card welcome-card">

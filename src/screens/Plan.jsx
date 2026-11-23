@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { SLOTS, SLOT_LABEL, WEEKDAYS, addDays, dayKey, getCatalog } from '../catalog.js';
 import { Header, DietDot, Empty } from '../ui.jsx';
-import { api, brain, go, useBrain, whatsappLink } from '../lib.js';
+import { brain, go, useBrain, whatsappLink } from '../lib.js';
+import { FestivalCard, festivalsOn } from '../festivals.jsx';
+import { ShareSheet, VoteResults, ballotOf, useBallots } from '../votes.jsx';
 import { t, LANGS } from '../i18n.js';
 
 // All the planning happens in Python (kitchen/planner.py). This screen shows the plan and sends taps back.
@@ -89,58 +91,12 @@ function Row({ label, recipe, locked, onLock, onSwap, onCooked, cooked }) {
   );
 }
 
-function FamilyVote({ day, date, family, findRecipe, plan, setPlan, notify, signedIn }) {
-  const [view, setView] = useState(null);
-  const poll = plan[date]?.poll;
-  useEffect(() => {
-    if (!poll) return undefined;
-    let live = true;
-    const load = () => api('polls/' + poll.token).then(v => live && setView(v)).catch(() => {});
-    load();
-    const id = setInterval(load, 15000);
-    return () => { live = false; clearInterval(id); };
-  }, [poll?.token]);
-
-  async function start() {
-    if (!signedIn) { notify('Please sign in to start a family vote'); return; }
-    try {
-      const { ids } = await brain('recommend', { ...family, slot: 'dinner', date, limit: 3 });
-      const current = day.dinner && findRecipe(day.dinner);
-      const options = [...(current ? [current] : []), ...ids.map(findRecipe).filter(Boolean)]
-        .filter((r, i, a) => a.findIndex(x => x.id === r.id) === i).slice(0, 3).map(r => ({ id: r.id, name: r.name }));
-      const { token } = await api('polls', { title: `What should we eat for dinner on ${dateLabel(date, dayKey())}?`, date, slot: 'dinner', options });
-      setPlan(p => ({ ...p, [date]: { ...p[date], poll: { token } } }));
-    } catch (e) { notify(e.message); }
-  }
-
-  function useWinner() {
-    const win = [...view.options].sort((a, b) => b.votes - a.votes)[0];
-    setPlan(p => {
-      const d = { ...p[date], dinner: win.id, locked: [...new Set([...(p[date].locked || []), 'dinner'])] };
-      delete d.poll;
-      return { ...p, [date]: d };
-    });
-    notify(`${win.name} it is!`);
-  }
-
-  if (!poll) return <button className="btn link small-btn" onClick={start}>🗳 Ask the family about dinner</button>;
-  const link = `${location.origin}${location.pathname}#/vote/${poll.token}`;
-  return (
-    <div className="vote-box">
-      <b>{t('Family vote')}</b>
-      {view?.options.map(o => <div key={o.id} className="row between small"><span>{o.name}</span><b>{o.votes}</b></div>)}
-      <div className="row">
-        <a className="btn whatsapp sm" href={whatsappLink(`What should we eat? Vote here: ${link}`)} target="_blank" rel="noreferrer">Share vote</a>
-        {view?.total > 0 && <button className="btn sm" onClick={useWinner}>Use the winner</button>}
-      </div>
-    </div>
-  );
-}
-
-export default function Plan({ pantry, log, plan, setPlan, pins, setPins, prefs, setPrefs, catalog, family, findRecipe, addToShopping, logMeal, notify, auth }) {
+export default function Plan(ctx) {
+  const { pantry, log, plan, setPlan, pins, setPins, prefs, setPrefs, catalog, family, findRecipe, addToShopping, logMeal, notify } = ctx;
   const today = dayKey();
   const [lang, setMenuLang] = useState(prefs.menuLang || 'hi');
   const [busy, setBusy] = useState(false);
+  const [sharing, setSharing] = useState(null); // a date, or 'week', while the share sheet is open
   const [changing, setChanging] = useState(null); // { date, slot } while the swap picker is open
   const observed = prefs.observed || [];
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(today, i)), [today]);
@@ -148,7 +104,7 @@ export default function Plan({ pantry, log, plan, setPlan, pins, setPins, prefs,
   // Prep reminders, groceries, the cook's menu and portion tips, all from Python.
   const info = useBrain('plan-info', { ...family, plan, lang }, planned);
   const { prep = [], groceries = [], menu = null, plateTips = 0 } = info.data || {};
-  const upcoming = catalog.festivals.filter(f => f.date >= today).slice(0, 6);
+  const [ballots, updateBallot] = useBallots(days.map(d => ballotOf(plan[d])), n => notify(`🗳 ${n} new family vote${n > 1 ? 's' : ''}`));
 
   async function makePlan() {
     setBusy(true);
@@ -157,7 +113,7 @@ export default function Plan({ pantry, log, plan, setPlan, pins, setPins, prefs,
       // Keep the last 60 days so the dashboard and repeat checks have history.
       const cutoff = addDays(today, -60);
       const kept = Object.fromEntries(Object.entries(plan).filter(([d]) => d >= cutoff && !fresh[d]));
-      for (const [d, day] of Object.entries(fresh)) if (plan[d]?.poll) day.poll = plan[d].poll;
+      for (const [d, day] of Object.entries(fresh)) { if (plan[d]?.vote) day.vote = plan[d].vote; if (plan[d]?.poll) day.poll = plan[d].poll; }
       setPlan({ ...kept, ...fresh });
       notify('Your week is planned. Lock what you like, swap what you don\'t.');
     } catch (e) { notify(e.message); }
@@ -181,9 +137,11 @@ export default function Plan({ pantry, log, plan, setPlan, pins, setPins, prefs,
   return (
     <div className="screen">
       <Header title={t('Weekly plan')} />
+      {sharing && <ShareSheet date={sharing === 'week' ? null : sharing} ctx={ctx} onClose={() => setSharing(null)} />}
       {changing && <SwapPicker {...changing} today={today} plan={plan} setPlan={setPlan} family={family} findRecipe={findRecipe} catalog={catalog}
         notify={notify} onClose={() => setChanging(null)} />}
       <button className="btn primary big" onClick={makePlan} disabled={busy}>{busy ? 'Planning your week…' : planned ? 'Refresh unlocked meals' : t('Plan my week')}</button>
+      {planned && <button className="btn whatsapp share-week" onClick={() => setSharing('week')}>📤 Share the week on WhatsApp and vote</button>}
       {!pantry.length && <p className="muted small">Tip: add your kitchen items first, so the plan uses what you already have.</p>}
 
       {prep.length > 0 && (
@@ -203,7 +161,7 @@ export default function Plan({ pantry, log, plan, setPlan, pins, setPins, prefs,
         const canLog = date === today;
         return (
           <section key={date} className="card plan-day">
-            <div className="row between"><h3>{dateLabel(date, today)}</h3>{day.festival && <span className="pill warn">{day.festival}</span>}</div>
+            <div className="row between"><h3>{dateLabel(date, today)}</h3><span>{festivalsOn(catalog, date).map(f => <span key={f.id} className="pill warn">🪔 {f.name}</span>)}</span></div>
             {SLOTS.map(slot => (
               <Row key={slot} label={t(SLOT_LABEL[slot])} recipe={day[slot] && findRecipe(day[slot])} locked={lock.includes(slot)}
                 onLock={() => toggleLock(date, slot)} onSwap={() => swap(date, slot)} cooked={cookedToday(day[slot], slot)}
@@ -212,7 +170,9 @@ export default function Plan({ pantry, log, plan, setPlan, pins, setPins, prefs,
             {Object.entries(day.tiffins || {}).map(([who, id]) => <Row key={'t' + who} label={`Tiffin · ${who}`} recipe={findRecipe(id)} />)}
             {Object.entries(day.fast || {}).map(([who, id]) => <Row key={'f' + who} label={`Vrat · ${who}`} recipe={findRecipe(id)} />)}
             {date === today && plateTips > 0 && <p className="muted small">🍽 {plateTips} portion tip{plateTips > 1 ? 's' : ''} today. Open a dish to see who needs what.</p>}
-            <FamilyVote day={day} date={date} family={family} findRecipe={findRecipe} plan={plan} setPlan={setPlan} notify={notify} signedIn={!!auth.user} />
+            {ballotOf(day)
+              ? ballots[ballotOf(day)] && <VoteResults ballot={ballots[ballotOf(day)]} date={date} ctx={ctx} onUpdate={updateBallot} />
+              : <button className="btn link small-btn" onClick={() => setSharing(date)}>🗳 Share on WhatsApp and vote</button>}
           </section>
         );
       })}
@@ -255,18 +215,7 @@ export default function Plan({ pantry, log, plan, setPlan, pins, setPins, prefs,
         </div>
       )}
 
-      {upcoming.length > 0 && (
-        <div className="card">
-          <h3>🪔 Festivals and fasts</h3>
-          <p className="muted small">Tick the fasts your family keeps. Ballava plans a vrat meal for those days.</p>
-          {upcoming.map(f => (
-            <label key={f.id} className="check">
-              {f.fast && <input type="checkbox" checked={observed.includes(f.id)} onChange={e => setPrefs(p => ({ ...p, observed: e.target.checked ? [...observed, f.id] : observed.filter(x => x !== f.id) }))} />}
-              <span>{f.name} <span className="muted small">{dateLabel(f.date, today)}</span></span>
-            </label>
-          ))}
-        </div>
-      )}
+      <FestivalCard {...ctx} />
     </div>
   );
 }

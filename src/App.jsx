@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useHashRoute, go, api } from './lib.js';
 import { useSynced, startSync, rejoin, wipeDevice } from './sync.js';
 import { setLang, t } from './i18n.js';
@@ -81,13 +81,29 @@ export default function App() {
 
   // Is the AI switched on? Asked when the app opens, again whenever Chef or Recipe Studio opens,
   // and when you come back to the tab, so a server restart or a newly added key never leaves it stuck on "off".
+  const held = useRef({ stamp: null, loading: false }); // which version of the recipe book and festivals this screen has
+  const loadCatalog = useCallback(async () => {
+    if (held.current.loading) return;
+    held.current.loading = true;
+    try {
+      const c = await api('catalog');
+      storeCatalog(c);
+      setCatalog(getCatalog());
+      held.current.stamp = c.stamp;
+    } finally { held.current.loading = false; }
+  }, []);
   const refreshAi = useCallback(() => api('health')
-    .then(d => { setAiStatus({ checked: true, ai: !!d.ai, provider: d.aiProvider || null, server: true, retentionDays: d.retentionDays }); return d; })
+    .then(d => { setAiStatus({ checked: true, ai: !!d.ai, provider: d.aiProvider || null, server: true, retentionDays: d.retentionDays });
+      // Admins changed something (a festival, an announcement, a recipe)? Fetch it, without a reload.
+      if (d.catalog !== held.current.stamp) loadCatalog().catch(() => {});
+      return d;
+    })
     .catch(() => setAiStatus(s => ({ ...s, checked: true, server: false }))), []);
   useEffect(() => {
     const onFocus = () => refreshAi();
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    const timer = setInterval(() => document.visibilityState === 'visible' && refreshAi(), 30000);
+    return () => { window.removeEventListener('focus', onFocus); clearInterval(timer); };
   }, [refreshAi]);
 
   // Ballava keeps things for 6 months (the server decides how long). Old meals, saved dishes and AI recipes are
@@ -113,7 +129,6 @@ export default function App() {
   }, [aiStatus.retentionDays]);
 
   useEffect(() => {
-    refreshAi();
     loadMe().catch(() => {
       // No connection: if this device was signed in, keep working from what it has.
       let cached = null;
@@ -122,7 +137,7 @@ export default function App() {
       if (cached) startSync({ onLost: sessionLost });
     });
     // The recipe book comes from the Python server, and is kept on the phone for offline use.
-    api('catalog').then(c => { storeCatalog(c); setCatalog(getCatalog()); }).catch(() => setCatalogFailed(true));
+    loadCatalog().catch(() => setCatalogFailed(true)).then(refreshAi);
   }, [loadMe]);
 
   useEffect(() => {
@@ -179,10 +194,10 @@ export default function App() {
     notify(on ? `Removed ${recipe.name} from saved dishes` : `Saved ${recipe.name} ❤️`);
   }, [savedIds, setSavedDishes, setAiRecipes, notify]);
 
-  const [screen, param] = route;
+  const [screen, param, extraParam] = route;
   // Moving to another screen closes the AI window; the old #/ask address opens it.
   useEffect(() => { setChatOpen(screen === 'ask'); }, [screen, param]);
-  if (screen === 'vote') return <Vote token={param} />;
+  if (screen === 'vote') return <Vote group={param} choice={extraParam} />;
 
   if (!auth.checked) return <div className="splash"><span className="brand-mark">B</span></div>;
   if (!auth.user && !guest) {

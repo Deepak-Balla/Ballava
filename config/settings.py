@@ -151,6 +151,9 @@ ANTHROPIC_MODEL = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-5-5')
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash-lite')
 AI_RATE_LIMIT = int(os.environ.get('AI_RATE_LIMIT', '10'))
 SIGNUP_RATE_LIMIT = int(os.environ.get('SIGNUP_RATE_LIMIT', '20'))
+# The address other people can open, for links shared on WhatsApp (e.g. https://ballava.example.com).
+# Only needed when you use Ballava at localhost, which nobody else can reach.
+PUBLIC_URL = os.environ.get('PUBLIC_URL', '').strip().rstrip('/')
 # How long Ballava keeps what people do (see kitchen/retention.py). 180 days = 6 months. 0 keeps everything.
 DATA_RETENTION_DAYS = int(os.environ.get('DATA_RETENTION_DAYS', '180'))
 # Phone sign-in: OTP_DEV_MODE=1 shows the code on screen (your own computer only), or set the TWILIO_* values.

@@ -1,8 +1,11 @@
 """Tests for sign-in, family data, family codes, voting and "my data"."""
+from datetime import timedelta
+
 import pytest
 from django.contrib.auth.models import User
+from django.utils import timezone
 
-from kitchen.models import FamilyData, Household
+from kitchen.models import FamilyData, Household, Poll, Vote
 from .conftest import Api
 
 pytestmark = pytest.mark.django_db
@@ -174,6 +177,98 @@ def test_family_vote(make_user):
     assert [o['votes'] for o in changed['options']] == [1, 1] and changed['total'] == 2
     assert 'household' not in str(changed)
     assert guest.get_json('polls/nope')[0] == 404
+
+
+def day(n=1):
+    return (timezone.localdate() + timedelta(days=n)).isoformat()
+
+
+DINNER = [{'id': 'rajma_masala', 'name': 'Rajma'}, {'id': 'chole', 'name': 'Chole'}, {'id': 'poha', 'name': 'Poha'}]
+
+
+def open_ballot(c, *slots):
+    status, made = c.post_json('ballots', {'meals': [{'date': day(), 'slot': s, 'options': DINNER} for s in slots or ['dinner']]})
+    assert status == 200, made
+    return made
+
+
+def test_sharing_a_plan_opens_a_vote_for_every_meal(make_user):
+    c = make_user()
+    assert Api().post_json('ballots', {'meals': [{'date': day(), 'slot': 'dinner', 'options': DINNER}]})[0] == 401
+    for bad in ([], [{'date': 'soon', 'slot': 'dinner', 'options': DINNER}], [{'date': day(), 'slot': 'brunch', 'options': DINNER}],
+                [{'date': day(), 'slot': 'dinner', 'options': DINNER[:1]}], 'all'):
+        assert c.post_json('ballots', {'meals': bad})[0] == 400, bad
+    made = open_ballot(c, 'lunch', 'dinner')
+    assert [m['slot'] for m in made['meals']] == ['lunch', 'dinner']
+    assert not any(m['closed'] or m['total'] for m in made['meals'])
+    # Family members open it without an account, and never learn whose family it is.
+    guest = Api().get_json('ballots/' + made['group'])
+    assert guest[0] == 200 and [m['title'] for m in guest[1]['meals']] == ['Lunch', 'Dinner']
+    assert c.email not in str(guest[1]) and 'household' not in str(guest[1])
+    assert Api().get_json('ballots/nope')[0] == 404
+
+
+def test_votes_from_whatsapp_show_names_leaders_and_ties(make_user):
+    c = make_user()
+    made = open_ballot(c)
+    token = made['meals'][0]['token']
+    vote = lambda who, dish, name='': Api().post_json(f'polls/{token}/vote', {'voter': who, 'optionId': dish, 'name': name})[1]
+    assert vote('phone1', 'chole', 'Riya')['mine'] == 'chole'
+    vote('phone2', 'rajma_masala', 'Dadaji')
+    tie = vote('phone3', 'rajma_masala')
+    assert tie['leaders'] == ['rajma_masala'] and tie['total'] == 3
+    vote('phone3', 'chole')  # changing your mind moves the vote, it doesn't add one
+    seen = c.get_json('ballots/' + made['group'])[1]['meals'][0]
+    assert {o['id']: o['votes'] for o in seen['options']} == {'rajma_masala': 1, 'chole': 2, 'poha': 0}
+    assert next(o for o in seen['options'] if o['id'] == 'chole')['voters'] == ['Riya'] and seen['leaders'] == ['chole']
+    vote('phone4', 'rajma_masala')
+    assert set(c.get_json('ballots/' + made['group'])[1]['meals'][0]['leaders']) == {'rajma_masala', 'chole'}
+    assert Api().get_json(f'ballots/{made["group"]}?voter=phone1')[1]['meals'][0]['mine'] == 'chole'
+
+
+def test_a_signed_in_voter_counts_once_and_cannot_be_imitated(make_user):
+    c = make_user()
+    token = open_ballot(c)['meals'][0]['token']
+    c.post_json(f'polls/{token}/vote', {'voter': 'phone', 'optionId': 'chole'})
+    again = c.post_json(f'polls/{token}/vote', {'voter': 'laptop', 'optionId': 'poha'})[1]
+    assert again['total'] == 1 and again['mine'] == 'poha'
+    guest = Api().post_json(f'polls/{token}/vote', {'voter': f'u:{c.id}', 'optionId': 'chole'})[1]
+    assert guest['total'] == 2, 'a guest using someone else\'s id is just another guest'
+
+
+def test_a_vote_closes_after_the_day_of_the_meal(make_user):
+    c = make_user()
+    made = open_ballot(c)
+    closes = timezone.localtime(Poll.objects.get(group=made['group']).closes_at)
+    assert closes.date().isoformat() == day(2) and closes.hour == 0
+    Poll.objects.update(closes_at=timezone.now() - timedelta(minutes=1))
+    token = made['meals'][0]['token']
+    assert Api().post_json(f'polls/{token}/vote', {'voter': 'late', 'optionId': 'chole'})[0] == 410
+    assert Api().get_json('ballots/' + made['group'])[1]['meals'][0]['closed']
+
+
+def test_whatsapp_link_previews_without_voting(make_user):
+    c = make_user()
+    made = open_ballot(c)
+    r = Api().get(f'/v/{made["group"]}/0-1')
+    page = r.content.decode()
+    assert r.status_code == 200 and f'/#/vote/{made["group"]}/0-1' in page and 'og:title' in page
+    assert Api().get(f'/v/{made["group"]}').status_code == 200
+    assert b'not found' in Api().get('/v/nope').content
+    assert Api().get('/v/nope/0-1%22%3E%3Cscript%3E').content.find(b'<script>') == -1
+    assert Vote.objects.count() == 0, 'WhatsApp opening the link to preview it is not a vote'
+
+
+def test_shared_links_never_point_at_localhost_when_there_is_a_better_address(make_user, settings):
+    c = make_user()
+    settings.ALLOWED_HOSTS = ['localhost', '127.0.0.1', '192.168.1.50', 'testserver']
+    body = {'meals': [{'date': day(), 'slot': 'dinner', 'options': DINNER}]}
+    assert c.post_json('ballots', body, HTTP_HOST='localhost:8000')[1]['shareBase'] == 'http://192.168.1.50:8000'
+    assert c.post_json('ballots', body, HTTP_HOST='192.168.1.50:8000')[1]['shareBase'] == 'http://192.168.1.50:8000'
+    settings.PUBLIC_URL = 'https://ballava.example'
+    group = c.post_json('ballots', body, HTTP_HOST='localhost:8000')[1]
+    assert group['shareBase'] == 'https://ballava.example'
+    assert c.get_json('ballots/' + group['group'])[1]['shareBase'] == 'https://ballava.example'
 
 
 # ---------------------------------------------------------------- Ballava Chef: saved chats

@@ -59,7 +59,7 @@ CHEF_LENGTH = {'short': 'Keep answers short: under 80 words unless they ask for 
 CHEF_LANGUAGE = {'en': 'English', 'hi': 'Hindi', 'te': 'Telugu', 'ta': 'Tamil'}
 
 
-def context_text(ctx, body, current=None, now=None, named=None, made=None):
+def context_text(ctx, body, current=None, now=None, named=None, made=None, festivals=()):
     """Everything the AI should know, as plain text. `named` is a recipe-book dish the question names;
     `made` is a plan the app drafted because they asked to plan."""
     tz = ctx['tz']
@@ -85,6 +85,10 @@ def context_text(ctx, body, current=None, now=None, named=None, made=None):
                    if made['kind'] == 'day' else ' Do not change the week plan; just describe it.')]
     if current:
         out += ['The recipe open on their screen:', recipe_block(current)]
+    coming = [f for f in festivals if 0 <= planner.days_between(today, f['date']) <= 30]
+    if coming:
+        out.append('Festivals coming up: ' + '; '.join(
+            f"{f['name']} on {f['date']}{' (a fasting day)' if f['fast'] else ''}" for f in coming[:8]) + '.')
     pantry_ids = [p['id'] for p in ctx['pantry']]
     if named and named is not current:
         missing = [engine.name_of(o[0]) for o in engine.match_recipe(named, pantry_ids)['missing']]
