@@ -71,7 +71,7 @@ def test_too_many_wrong_codes_kills_the_code(api, settings):
 
 def test_code_is_never_shown_outside_dev_mode(api, settings):
     settings.OTP_DEV_MODE = False
-    assert api.get_json('auth/config')[1] == {'phone': False, 'devOtp': False}
+    assert api.get_json('auth/config')[1] == {'phone': False, 'devOtp': False, 'supabase': None}
     status, body = api.post_json('auth/otp/request', {'phone': '9000000002'})
     assert status == 503 and 'devCode' not in body
 

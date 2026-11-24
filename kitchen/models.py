@@ -31,6 +31,7 @@ class Profile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='profile')
     household = models.ForeignKey(Household, null=True, blank=True, on_delete=models.SET_NULL, related_name='people')
     phone = models.CharField(max_length=20, unique=True, null=True, blank=True)
+    supabase_id = models.UUIDField(unique=True, null=True, blank=True, editable=False)  # who they are at Supabase Auth, if it's used
     consent_at = models.DateTimeField(null=True, blank=True)
     last_seen = models.DateTimeField(null=True, blank=True)
 

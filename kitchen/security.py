@@ -1,6 +1,7 @@
 """Small safety helpers: rate limits, phone numbers and one-time sign-in codes."""
 import hashlib
 import hmac
+import ipaddress
 import logging
 import re
 import secrets
@@ -42,6 +43,12 @@ def clear_limit(key):
 
 
 def client_ip(request):
+    header = settings.CLIENT_IP_HEADER
+    if header:
+        try:
+            return str(ipaddress.ip_address(request.headers.get(header, '').strip()))
+        except ValueError:
+            pass
     return request.META.get('REMOTE_ADDR', 'x')
 
 

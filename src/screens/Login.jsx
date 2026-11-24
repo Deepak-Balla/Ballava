@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../lib.js';
+import SupabaseSignIn from './SupabaseSignIn.jsx';
 
 function Consent({ value, onChange }) {
   return (
@@ -37,10 +38,10 @@ export default function Login({ onDone, onGuest, server }) {
   const [devCode, setDevCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [config, setConfig] = useState({ phone: false });
+  const [config, setConfig] = useState(null); // how this server signs people in
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
-  useEffect(() => { api('auth/config').then(setConfig).catch(() => {}); }, []);
+  useEffect(() => { api('auth/config').then(setConfig).catch(() => setConfig({ phone: false })); }, []);
 
   async function run(fn) {
     setBusy(true); setError('');
@@ -89,7 +90,12 @@ export default function Login({ onDone, onGuest, server }) {
           {tab('signin', 'Sign in')}{tab('signup', 'Create account')}{tab('admin', 'Admin')}
         </div>
 
-        {mode === 'admin' ? <AdminSignIn /> : (
+        {mode === 'admin' ? <AdminSignIn /> : !config ? <p className="muted center" role="status">One moment…</p> : config.supabase && mode !== 'phone' ? (
+          <>
+            {config.phone && <div className="chips method"><button type="button" className="chip" onClick={() => setMode('phone')}>Use my phone number instead</button></div>}
+            <SupabaseSignIn config={config.supabase} mode={mode} setMode={setMode} onDone={onDone} Consent={Consent} />
+          </>
+        ) : (
         <form className="card form" onSubmit={submit}>
           {config.phone && (
             <div className="chips method" role="group" aria-label="Sign in with">

@@ -1,8 +1,10 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
+import { captureReturn } from './supabase.js';
 import './styles.css';
 
+captureReturn(); // coming back from Google or from a link in an email: take the details out of the address bar first
 createRoot(document.getElementById('root')).render(<App />);
 
 // Offline support + "Add to Home screen" (only on a real website or localhost).

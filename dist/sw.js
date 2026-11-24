@@ -1,6 +1,6 @@
 // Ballava service worker: lets the app open even with no internet.
-const CACHE = 'ballava-mwtagf34';
-const SHELL = ['./', 'index.html', 'app.js?v=mwtagf34', 'app.css?v=mwtagf34', 'manifest.webmanifest', 'icon.svg', 'icon-192.png'];
+const CACHE = 'ballava-mwunqssa';
+const SHELL = ['./', 'index.html', 'app.js?v=mwunqssa', 'app.css?v=mwunqssa', 'manifest.webmanifest', 'icon.svg', 'icon-192.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -12,7 +12,8 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/') || url.pathname.startsWith('/v/') || url.pathname.includes('admin')) return; // API always live
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/') || url.pathname.startsWith('/v/') || url.pathname.includes('admin')
+    || url.searchParams.has('code') || url.searchParams.has('error')) return; // API always live; sign-in details are never kept
   e.respondWith(
     caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
       const copy = res.clone();

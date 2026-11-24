@@ -23,7 +23,7 @@ from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 
-from . import ai, assistant, catalog, engine, planner, retention
+from . import ai, assistant, catalog, engine, planner, retention, supabase
 from .models import AiUsage, ChatThread, FamilyData, Household, Poll, Profile, Vote
 from .security import ApiError, auth_config, check_code, clear_limit, client_ip, limited, request_code
 
@@ -124,12 +124,55 @@ def catalog_view(request, body):
 
 @endpoint(methods=('GET',))
 def config_view(request, body):
-    return auth_config()
+    return {**auth_config(), 'supabase': supabase.public_config()}
 
 
 # ---------------------------------------------------------------- sign-in
+def own_passwords_only():
+    if supabase.enabled():
+        raise ApiError(403, 'Please use the sign-in on the Ballava screen. (Reload the page if you don\'t see it.)')
+
+
+@endpoint()
+def supabase_login(request, body):
+    """Someone signed in with Supabase (email or Google): {accessToken, name, consent}. Starts their Ballava session.
+    The first time, they must agree to how their data is stored: until then the answer is {needsConsent: true}."""
+    if not supabase.enabled():
+        raise ApiError(404, 'Supabase sign-in is not set up on this server.')
+    if limited('supabase:' + client_ip(request), 40, 900):
+        raise ApiError(429, 'Too many tries. Please wait 15 minutes and try again.')
+    who = supabase.person(body.get('accessToken'))
+    profile = Profile.objects.select_related('user').filter(supabase_id=who['id']).first()
+    user, is_new = profile.user if profile else User.objects.filter(username=who['email']).first(), False
+    if user and (user.is_staff or not user.is_active or not hasattr(user, 'profile')):
+        raise ApiError(403, 'This account cannot sign in here.')
+    if user and not profile:
+        # They had a Ballava account before. Same email, proven to be theirs: it's the same person, with all their data.
+        if not who['proven']:
+            raise ApiError(409, 'An account with this email already exists. Please sign in with Google, or ask the owner to switch on "Confirm email" in Supabase.')
+        Profile.objects.filter(pk=user.profile.pk).update(supabase_id=who['id'])
+        user.set_unusable_password()  # the old password no longer opens anything
+        user.save(update_fields=['password'])
+    if not user:
+        name = clean_name(body.get('name')) or who['name'] or who['email'].split('@')[0].capitalize()
+        if not body.get('consent'):
+            return {'needsConsent': True, 'name': name, 'email': who['email']}
+        if limited('signup:' + client_ip(request), settings.SIGNUP_RATE_LIMIT, 3600):
+            raise ApiError(429, 'Too many sign-ups from here. Please try again later.')
+        with transaction.atomic():
+            user, is_new = new_family_user(name, email=who['email']), True
+            Profile.objects.filter(user=user).update(supabase_id=who['id'])
+    elif user.email != who['email'] and not User.objects.filter(username=who['email']).exclude(pk=user.pk).exists():
+        user.email = user.username = who['email']  # they changed it at Supabase
+        user.save(update_fields=['email', 'username'])
+    user = User.objects.get(pk=user.pk)
+    login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+    return {'user': public_user(user), 'isNew': is_new}
+
+
 @endpoint()
 def signup(request, body):
+    own_passwords_only()
     ip = client_ip(request)
     if limited('signup:' + ip, settings.SIGNUP_RATE_LIMIT, 3600):
         raise ApiError(429, 'Too many sign-ups from here. Please try again later.')
@@ -160,6 +203,7 @@ def signup(request, body):
 
 @endpoint()
 def login_view(request, body):
+    own_passwords_only()
     email = str(body.get('email') or '').strip().lower()
     key = f'login:{email}:{client_ip(request)}'
     if limited(key, 6, 900):
@@ -298,12 +342,14 @@ def delete_account(request, body):
     user = require_user(request)
     if body.get('confirm') != 'DELETE':
         raise ApiError(400, 'Please type DELETE to confirm.')
+    supabase_id = user.profile.supabase_id
     with transaction.atomic():
         orphan = _leave_household(user)
         logout(request)
         user.delete()
         if orphan:
             orphan.delete()
+    supabase.delete_person(supabase_id)
     return {'ok': True}
 
 

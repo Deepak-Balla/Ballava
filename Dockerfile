@@ -20,7 +20,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY manage.py ./
+COPY manage.py gunicorn.conf.py ./
 COPY config ./config
 COPY kitchen ./kitchen
 COPY --from=screens /build/dist ./dist
@@ -33,7 +33,8 @@ VOLUME ["/data"]
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=4)"
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:' + __import__('os').environ.get('PORT', '8000') + '/healthz', timeout=4)"
 
-# Update the database tables, then start the production web server.
-CMD ["sh", "-c", "python manage.py migrate --noinput && exec gunicorn config.wsgi --bind 0.0.0.0:8000 --workers 2 --threads 4 --access-logfile -"]
+# Start the production web server; gunicorn.conf.py also updates the database tables. Hosting services say which PORT
+# to use, and WEB_CONCURRENCY is how many processes (1 on a small free plan).
+CMD ["gunicorn", "config.wsgi"]

@@ -2,6 +2,7 @@
 Django==6.0.10           # the web framework: pages, database, logins, admin portal
 whitenoise==6.12.0       # serves the phone app's files efficiently
 python-dotenv==1.2.4     # reads settings from the .env file
+psycopg[binary]==3.3.9   # talks to Postgres, the database used online (DATABASE_URL)
 anthropic==2.6.0         # talks to Claude for the optional AI Chef (AI_PROVIDER=claude)
 google-genai==3.5.0      # talks to Google Gemini for the optional AI Chef (AI_PROVIDER=gemini)
 gunicorn==26.2.0; sys_platform != "win32"   # production web server (used in Docker; not needed on Windows)

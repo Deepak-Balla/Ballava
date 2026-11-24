@@ -24,6 +24,7 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils import timezone
 
+from . import supabase
 from .models import AiUsage, Attempt, ChatThread, FamilyData, Household, Housekeeping, Poll
 
 log = logging.getLogger('kitchen')
@@ -76,6 +77,7 @@ def cleanup(now=None):
     for user in stale.select_related('profile'):
         if user.profile.last_seen and user.profile.last_seen >= when:
             continue
+        supabase_id = user.profile.supabase_id
         with transaction.atomic():
             household = user.profile.household
             user.delete()
@@ -83,6 +85,7 @@ def cleanup(now=None):
             if household and not household.people.exists():
                 household.delete()
                 done['families'] += 1
+        supabase.delete_person(supabase_id)
 
     # Dated family data: old meals, old saved dishes, old AI recipes.
     for household in Household.objects.all():

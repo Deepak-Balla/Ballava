@@ -8,6 +8,7 @@ urlpatterns = [
     path('health', api.health),
     path('catalog', api.catalog_view),
     # accounts
+    path('auth/supabase', api.supabase_login),
     path('auth/config', api.config_view),
     path('auth/signup', api.signup),
     path('auth/login', api.login_view),

@@ -5,10 +5,13 @@ Settings come from environment variables, or from a .env file in the project fol
 """
 import os
 import secrets
+import sys
 from pathlib import Path
 
 from django.utils.csp import CSP
 from dotenv import load_dotenv
+
+from . import database
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
@@ -26,7 +29,9 @@ DATA_DIR = Path(os.environ.get('DATA_DIR', BASE_DIR / 'data'))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Turn DEBUG off on a live website (DJANGO_DEBUG=0). It shows error details that strangers must not see.
-DEBUG = env_flag('DJANGO_DEBUG', default=True)
+ON_RENDER = env_flag('RENDER')  # set by the hosting service render.com
+DEBUG = env_flag('DJANGO_DEBUG', default=not ON_RENDER)
+TESTING = 'pytest' in sys.modules
 
 
 def _secret_key():
@@ -34,6 +39,8 @@ def _secret_key():
     key = os.environ.get('DJANGO_SECRET_KEY')
     if key:
         return key
+    if ON_RENDER:
+        raise RuntimeError('Set DJANGO_SECRET_KEY in Render (Environment): its disk is wiped on every restart, which would sign everyone out.')
     path = DATA_DIR / 'secret_key.txt'
     if not path.exists():
         path.write_text(secrets.token_urlsafe(50))
@@ -43,6 +50,11 @@ def _secret_key():
 SECRET_KEY = _secret_key()
 ALLOWED_HOSTS = env_list('DJANGO_ALLOWED_HOSTS', '*' if DEBUG else 'localhost,127.0.0.1')
 CSRF_TRUSTED_ORIGINS = env_list('DJANGO_CSRF_TRUSTED_ORIGINS')
+# Your own domain (SITE_DOMAIN=ballava.com): its www address and the address Render gives are allowed too.
+SITE_DOMAIN = os.environ.get('SITE_DOMAIN', '').strip().lower().removeprefix('https://').removeprefix('http://').strip('/').removeprefix('www.')
+for _host in ([SITE_DOMAIN, 'www.' + SITE_DOMAIN] if SITE_DOMAIN else []) + env_list('RENDER_EXTERNAL_HOSTNAME'):
+    ALLOWED_HOSTS.append(_host)
+    CSRF_TRUSTED_ORIGINS.append('https://' + _host)
 
 INSTALLED_APPS = [
     'kitchen',  # first, so its version of `createsuperuser` (with the admin password rule) is the one used
@@ -56,6 +68,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'config.middleware.HealthCheck',
     'django.middleware.security.SecurityMiddleware',
     'django.middleware.csp.ContentSecurityPolicyMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
@@ -87,6 +100,11 @@ DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': DATA_DI
                          'OPTIONS': {'init_command': 'PRAGMA journal_mode=WAL;', 'transaction_mode': 'IMMEDIATE', 'timeout': 20},
                          # Tests use their own file (never your real data), so each web-server thread gets its own connection.
                          'TEST': {'NAME': DATA_DIR / 'test_db.sqlite3'}}}
+# Online, use Postgres instead (a free Supabase project, for example): DATABASE_URL=postgresql://user:password@host:5432/postgres
+# Tests never touch it, whatever is in your .env. (TEST_DATABASE_URL runs them on a Postgres of your choice.)
+DATABASE_URL = os.environ.get('TEST_DATABASE_URL' if TESTING else 'DATABASE_URL', '').strip()
+if DATABASE_URL:
+    DATABASES['default'] = database.from_url(DATABASE_URL)
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Fridge photos for AI Chef can be up to 8 MB; each API view also sets its own smaller limit.
 DATA_UPLOAD_MAX_MEMORY_SIZE = 9 * 1024 * 1024
@@ -105,16 +123,23 @@ SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
 
 # Live website behind https: set DJANGO_SECURE=1.
-if env_flag('DJANGO_SECURE'):
+if env_flag('DJANGO_SECURE', default=ON_RENDER):
     SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = True
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_SSL_REDIRECT = env_flag('DJANGO_SSL_REDIRECT', default=True)
     SECURE_HSTS_SECONDS = 60 * 60 * 24 * 30
 
+# Sign-in with Supabase (optional, see kitchen/supabase.py). The first two are public: they go to every browser.
+SUPABASE_URL = '' if TESTING else os.environ.get('SUPABASE_URL', '').strip().rstrip('/').removesuffix('/rest/v1').removesuffix('/auth/v1')
+SUPABASE_PUBLISHABLE_KEY = '' if TESTING else (os.environ.get('SUPABASE_PUBLISHABLE_KEY') or os.environ.get('SUPABASE_ANON_KEY') or '').strip()
+SUPABASE_SECRET_KEY = '' if TESTING else os.environ.get('SUPABASE_SECRET_KEY', '').strip()  # never leaves the server
+SUPABASE_AUTH_URL = os.environ.get('SUPABASE_AUTH_URL', '').strip().rstrip('/') or (SUPABASE_URL + '/auth/v1' if SUPABASE_URL else '')
+
 X_FRAME_OPTIONS = 'DENY'
 SECURE_REFERRER_POLICY = 'same-origin'
 SECURE_CSP = {
     'default-src': [CSP.SELF],
+    'connect-src': [CSP.SELF] + (['/'.join(SUPABASE_AUTH_URL.split('/')[:3])] if SUPABASE_AUTH_URL else []),
     'style-src': [CSP.SELF, CSP.UNSAFE_INLINE],
     'img-src': [CSP.SELF, 'data:', 'blob:'],
     'frame-ancestors': [CSP.NONE],
@@ -153,7 +178,10 @@ AI_RATE_LIMIT = int(os.environ.get('AI_RATE_LIMIT', '10'))
 SIGNUP_RATE_LIMIT = int(os.environ.get('SIGNUP_RATE_LIMIT', '20'))
 # The address other people can open, for links shared on WhatsApp (e.g. https://ballava.example.com).
 # Only needed when you use Ballava at localhost, which nobody else can reach.
-PUBLIC_URL = os.environ.get('PUBLIC_URL', '').strip().rstrip('/')
+PUBLIC_URL = os.environ.get('PUBLIC_URL', '').strip().rstrip('/') or ('https://' + SITE_DOMAIN if SITE_DOMAIN else os.environ.get('RENDER_EXTERNAL_URL', '').rstrip('/'))
+# Behind a hosting service every visitor seems to come from the same address, so sign-up and voting limits would count
+# everyone together. This header, set by the service's own edge, holds the real one. Leave empty when there is no proxy.
+CLIENT_IP_HEADER = os.environ.get('CLIENT_IP_HEADER', 'CF-Connecting-IP' if ON_RENDER else '').strip()
 # How long Ballava keeps what people do (see kitchen/retention.py). 180 days = 6 months. 0 keeps everything.
 DATA_RETENTION_DAYS = int(os.environ.get('DATA_RETENTION_DAYS', '180'))
 # Phone sign-in: OTP_DEV_MODE=1 shows the code on screen (your own computer only), or set the TWILIO_* values.

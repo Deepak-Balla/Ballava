@@ -345,6 +345,7 @@ details summary { cursor: pointer; font-weight: 600; margin-top: 8px; }
 /* Sign-in: Sign in / Create account / Admin */
 .login-tabs { background: var(--card); box-shadow: var(--shadow); margin: 14px 0 0; }
 .login-tabs .seg { white-space: nowrap; font-size: .92rem; padding: 10px 4px; }
+.btn.google { background: #fff; color: #1f1f1f; border: 1.5px solid #d6d6d6; display: flex; align-items: center; justify-content: center; gap: 10px; }
 .chips.method { margin-bottom: 2px; }
 .admin-signin { border-top: 4px solid var(--ink); }
 

@@ -21,6 +21,7 @@ import Saved from './screens/Saved.jsx';
 import Settings from './screens/Settings.jsx';
 import Assistant from './Assistant.jsx';
 import { applyLook } from './look.js';
+import { hasReturned } from './supabase.js';
 
 const isGuest = () => { try { return localStorage.getItem('ballava.guest') === '1'; } catch { return false; } };
 
@@ -42,7 +43,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [aiStatus, setAiStatus] = useState({ checked: false, ai: false, server: false });
   const [auth, setAuth] = useState({ checked: false, user: null, household: null });
-  const [guest, setGuest] = useState(isGuest);
+  const [guest, setGuest] = useState(() => isGuest() && !hasReturned());
 
   setLang(prefs.lang);
   // Settings → Look (theme, colour, text size...), applied to the whole page, even before signing in.

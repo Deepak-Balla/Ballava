@@ -9,19 +9,31 @@ Both providers get the same instructions and safety rules, and their answers go 
 """
 import base64
 import binascii
+import importlib
 import json
 import logging
 import os
 import re
 
-import anthropic
-import httpx2  # the networking library both AI libraries use
 from django.conf import settings
-from google import genai
-from google.genai import errors as gemini_errors
-from google.genai import types as gemini_types
 
 from .security import ApiError
+
+
+class _WhenNeeded:
+    """A library that is loaded the first time it's used. The AI ones are big, and on a small server loading both at
+    start-up (when at most one is ever used) made waking up take half a minute longer."""
+
+    def __init__(self, name):
+        self._name = name
+
+    def __getattr__(self, attr):
+        return getattr(importlib.import_module(self._name), attr)
+
+
+anthropic = _WhenNeeded('anthropic')
+genai, gemini_errors, gemini_types = _WhenNeeded('google.genai'), _WhenNeeded('google.genai.errors'), _WhenNeeded('google.genai.types')
+httpx2 = _WhenNeeded('httpx2')  # the networking library both AI libraries use
 
 log = logging.getLogger(__name__)
 

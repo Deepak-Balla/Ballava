@@ -1,0 +1,30 @@
+# Puts Ballava on render.com's free plan. In Render: New > Blueprint > choose this repository. Full steps: DEPLOY.md
+services:
+  - type: web
+    name: ballava              # becomes https://<name>.onrender.com (Render adds letters if it's taken)
+    runtime: docker
+    plan: free
+    region: singapore          # the closest to India. Choose the same region for the Supabase project.
+    branch: main
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit  # every push to main goes live
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: WEB_CONCURRENCY   # one process fits the free plan's 512 MB
+        value: "1"
+      - key: AI_PROVIDER
+        value: gemini
+      # Render asks for these when it sets up. They are never in this file.
+      - key: DATABASE_URL              # Supabase > Connect > Session pooler
+        sync: false
+      - key: SUPABASE_URL              # Supabase > Project Settings > API
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY       # so deleting an account deletes its sign-in too
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SITE_DOMAIN               # your domain, e.g. ballava.com. Leave it empty until you have one.
+        sync: false

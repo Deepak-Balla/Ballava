@@ -8,3 +8,4 @@ legacy_js
 test-screenshots
 **/__pycache__
 .env
+backup*.json

@@ -16,6 +16,7 @@ Ballava is a web app that runs in any browser and installs on a phone like a nor
 - guides you while cooking: big steps, timers, a **pressure-cooker whistle counter**, read-aloud and hands-free voice
 - **Bachao!** mode rescues dishes (too salty, burnt, split kadhi…) and says honestly when food isn't safe
 - **family accounts**: one shared kitchen, plan and list across phones, by family code
+- **real sign-in** with Supabase when you put it online: email codes, password reset and Google (see DEPLOY.md)
 - **admin portal** at `/admin` for recipes, ingredients, Bachao fixes, announcements and festivals
 - optional AI (needs an AI key): **Ballava Chef**, a chat for any recipe by name, calories and swaps, and **Recipe Studio**, which gets or invents a recipe and reads a photo of your fridge
 
@@ -117,14 +118,14 @@ After 5 wrong admin passwords, that login is locked for 15 minutes.
 .venv\Scripts\python -m pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest
 ```
-This runs **243 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `243 passed`. The tests never call a real AI or use your keys.
+This runs **270 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `270 passed`. The tests never call a real AI or use your keys.
 
 **Real-browser checks (about a minute):**
 ```
 .venv\Scripts\python -m playwright install chromium
 .venv\Scripts\python -m pytest -m e2e
 ```
-This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, share the plan and vote from the WhatsApp link, see a festival an admin just added, fast for a day, and paste, check and publish a recipe as an admin. It also tries hands-free cooking with a pretend microphone, a fridge photo with a pretend AI, planning a day with Chef, changing a planned meal, the settings (dark theme, colour, text size) and the computer layout. Screenshots go to `test-screenshots/`. You should see `54 passed`.
+This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, share the plan and vote from the WhatsApp link, see a festival an admin just added, fast for a day, and paste, check and publish a recipe as an admin. It also tries hands-free cooking with a pretend microphone, a fridge photo with a pretend AI, planning a day with Chef, changing a planned meal, the settings (dark theme, colour, text size) and the computer layout. Screenshots go to `test-screenshots/`. You should see `61 passed`.
 
 > The tests switch AI **off** on purpose (so they never use your key or your free limit). That's why the test screenshots say "AI is off"; your own app is not affected.
 
@@ -275,12 +276,7 @@ Phone sign-in needs an SMS service.
 
 ## 10. Put it online
 
-Any host that runs Docker or Python works, for example Render, Railway, Fly.io, or a small cloud server.
-- **Easiest:** deploy with the included `Dockerfile`.
-- **Environment variables:** `DJANGO_ALLOWED_HOSTS=yourdomain.com`, `DJANGO_CSRF_TRUSTED_ORIGINS=https://yourdomain.com` and `DJANGO_SECURE=1`. For Ballava Chef and Recipe Studio, add `AI_PROVIDER` and its key (`GEMINI_API_KEY` or `ANTHROPIC_API_KEY`) in the host's settings page. Don't upload `.env`.
-- **Keep your data:** the host must give you a **permanent disk** mounted at `/data` (Docker), or set `DATA_DIR` to one. Without it, accounts vanish on every restart.
-- Check your settings with `python manage.py check --deploy`.
-- Hosts give you an **https** address, so phone install, microphone and offline mode all work.
+**[DEPLOY.md](DEPLOY.md)** has every step: Supabase (sign-in and database), Render (hosting), your own domain, emails and Google sign-in, all on free plans except the domain. Nothing changes on your own computer until you fill in those settings.
 
 ## 11. Project map
 
