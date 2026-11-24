@@ -37,7 +37,7 @@
       <li><a href="{% url 'admin:kitchen_recipe_change' r.pk %}">{{ r.name }}</a><span class="b-badge review">Waiting for review</span></li>
       {% endfor %}
       {% for r, problems in ballava_drafts %}
-      <li><span><a href="{% url 'admin:kitchen_recipe_change' r.pk %}">{{ r.name }}</a>{% if problems %}<br><span class="b-muted b-problems">{{ problems|join:"; " }}</span>{% endif %}</span><span class="b-badge draft">Draft</span></li>
+      <li><span><a href="{% url 'admin:kitchen_recipe_change' r.pk %}">{{ r.name }}</a>{% if problems %}<br><span class="b-muted b-problems">{% for p in problems %}{{ p.text }} {% endfor %}</span>{% endif %}</span><span class="b-badge draft">Draft</span></li>
       {% endfor %}
     </ul>
     {% else %}

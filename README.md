@@ -103,7 +103,8 @@ What the admin portal does:
 - **Dashboard:** numbers at a glance, quick actions, recipes waiting for review, recent changes, and AI use for the last 7 days. The bar under the header jumps to every section.
 - **Recipe book:** *every* recipe in one list, including the 121 built-in ones that live in the code, with search, filters (meal, diet, built-in or added, live, hidden or draft) and calories per serving. Click a dish to see everything about it: ingredients with grams and calories for each line, steps, allergens, Jain and onion/garlic checks. From there, **Edit** (for a built-in dish this starts your own copy), **Hide from users**, or **Open in the app**.
 - **Ingredients:** every ingredient with calories, protein, carbs, fat and fibre per 100 g, what a cup or piece weighs, and how many recipes use it. When you add an ingredient, fill in its nutrition so recipes count its calories.
-- **Recipes:** add new ones, or pick **Start from a built-in recipe** to change an existing one. Every edit starts as a *draft*. Select it in the list and use the actions menu: **Send to review**, then **Publish**. Recipes that break the safety rules (for example "gluten-free" with atta, or meat without a food-safety note) can't be published. Users keep seeing the last published version while you edit.
+- **Adding a recipe:** click **➕ Add a recipe** and choose how to start: **✨ Write it for me** (AI fills in everything from the dish's name), **📋 Paste a recipe** (from WhatsApp, a website or your notes; works without AI too), **📖 Copy a recipe**, or type it yourself. Pick ingredients by any name (tamatar, pyaz, kandi pappu) or type a whole line like "2 cups toor dal"; write "for 5 minutes" or "3 whistles" in a step and the timer is added. Calories, diet, allergens and anything left to fix show beside the form as you type. If an ingredient isn't in the list, add it right there. Then press **🚀 Publish**, or **💾 Save draft** to finish later.
+- **Changing a recipe:** open it in the Recipe book and click **Edit**. Users keep seeing the last published version until you publish again. Recipes that break the safety rules (for example "gluten-free" with atta, or meat without a food-safety note) can't be published. The owner (a superuser) publishes in one click; other admins press **Send to review**, and it's published after that.
 - **Hidden recipes**, **Ingredients**, **Rescues** (Bachao fixes), **Announcements**, **Festivals**: changes reach users within a minute, even if they have the app open. A festival shows on the Plan tab, and on the Dashboard from 30 days before. Tick **Fasting day** and families get fasting dishes for it (they can say they don't keep it). A festival whose date has passed is not shown (the list says so).
 - **Audit log:** every change, with who made it and when.
 - **Privacy:** admins see accounts only. Family kitchens, diets, health goals and meal diaries are never shown in the portal.
@@ -116,14 +117,14 @@ After 5 wrong admin passwords, that login is locked for 15 minutes.
 .venv\Scripts\python -m pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest
 ```
-This runs **218 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `218 passed`. The tests never call a real AI or use your keys.
+This runs **243 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `243 passed`. The tests never call a real AI or use your keys.
 
 **Real-browser checks (about a minute):**
 ```
 .venv\Scripts\python -m playwright install chromium
 .venv\Scripts\python -m pytest -m e2e
 ```
-This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, share the plan and vote from the WhatsApp link, see a festival an admin just added, fast for a day, and publish a recipe as an admin. It also tries hands-free cooking with a pretend microphone, a fridge photo with a pretend AI, planning a day with Chef, changing a planned meal, the settings (dark theme, colour, text size) and the computer layout. Screenshots go to `test-screenshots/`. You should see `54 passed`.
+This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, share the plan and vote from the WhatsApp link, see a festival an admin just added, fast for a day, and paste, check and publish a recipe as an admin. It also tries hands-free cooking with a pretend microphone, a fridge photo with a pretend AI, planning a day with Chef, changing a planned meal, the settings (dark theme, colour, text size) and the computer layout. Screenshots go to `test-screenshots/`. You should see `54 passed`.
 
 > The tests switch AI **off** on purpose (so they never use your key or your free limit). That's why the test screenshots say "AI is off"; your own app is not affected.
 
@@ -147,7 +148,7 @@ What the Docker setup does: it builds the phone screens with Node.js, installs P
 
 ## 7. Change the app
 
-- **Add or change a recipe:** `kitchen/data/recipes.py` or `recipes_more.py` (the format is explained at the top of the file), or use the admin portal with no code at all. Then run `pytest`. It tells you if a recipe has a typo or a wrong tag.
+- **Add or change a recipe:** use the admin portal, with no code at all. (The built-in ones are in `kitchen/data/recipes.py` and `recipes_more.py`; the format is explained at the top of the file.) Then run `pytest`. It tells you if a recipe has a typo or a wrong tag.
 - **Add an ingredient or a local name:** `kitchen/data/ingredients.py`, as comma-separated other names. Give every new ingredient a row in `kitchen/data/nutrition.py` too (calories per 100 g and what a cup or piece weighs); a test checks that none are missing.
 - **Add a Bachao fix:** `kitchen/data/rescue.py`.
 - **Change how dishes are chosen:** `kitchen/engine.py` (matching) and `kitchen/planner.py` (weekly plans, no repeats, family goals, dashboard).

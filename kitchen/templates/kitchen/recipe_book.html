@@ -3,6 +3,7 @@
 {% block breadcrumbs %}<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Home</a> &rsaquo; Recipe book</div>{% endblock %}
 
 {% block content %}
+{% if perms.kitchen.add_recipe %}<div class="b-actions"><a class="primary" href="{% url 'admin:kitchen_recipe_add' %}">➕ Add a recipe</a></div>{% endif %}
 <p class="b-muted">Every recipe in Ballava: the {{ builtin_total }} built-in ones that come with the app, and the ones admins added or edited. Calories are per serving, worked out from the ingredients.</p>
 
 <form class="b-filters" method="get" role="search">

@@ -1,0 +1,140 @@
+{% extends "admin/change_form.html" %}
+{% load static i18n admin_urls %}
+{# The recipe editor: pick ingredients by name, steps with timers, live checks and calories, and one Publish button. #}
+{# It's drawn by recipe_editor.js over the ordinary form fields (.re-raw), which still work if scripts are off. #}
+
+{% block extrahead %}{{ block.super }}<script src="{% static 'kitchen/recipe_editor.js' %}" defer></script>{% endblock %}
+{# The section bar at the top is enough here: Django's side menu would only take room from the form. #}
+{% block nav-sidebar %}{% endblock %}
+{% block coltype %}colM re-page{% endblock %}
+{% block content_title %}<h1>{% if editor_copying %}Edit {{ editor_copying.name }}{% elif add %}Add a recipe{% else %}Edit {{ original.name }}{% endif %}</h1>{% endblock %}
+
+{% block field_sets %}
+{% if not adminform.form.ingredients %}{{ block.super }}{% else %}{% with f=adminform.form %}
+{{ editor_data|json_script:"recipe-editor-data" }}
+<div class="re" id="recipe-editor">
+  {% if editor_copying %}<div class="b-note info">This is one of Ballava's own recipes. Once you publish your version, users see it instead of the original.</div>
+  {% elif not add %}<div class="b-split re-status"><span class="b-badge {% if editor_status_key == 'published' %}live{% elif editor_status_key == 'review' %}review{% else %}draft{% endif %}">{{ editor_status }}</span>{% if editor_is_live and editor_status_key != 'published' %}<span class="b-badge live">Users see the last published version</span>{% endif %}{% if editor_replaces %}<span class="b-badge edited">Replaces a built-in recipe</span>{% endif %}</div>{% endif %}
+
+  <div id="re-msg" role="status" aria-live="polite"></div>
+
+  {% if add and not editor_copying %}
+  <section class="b-card re-start" id="re-start" hidden>
+    <h3>How would you like to start?</h3>
+    <div class="re-tabs" role="tablist">
+      {% if editor_ai %}<button type="button" role="tab" data-tab="write">✨ Write it for me</button>{% endif %}
+      <button type="button" role="tab" data-tab="paste">📋 Paste a recipe</button>
+      <button type="button" role="tab" data-tab="copy">📖 Copy a recipe</button>
+      <button type="button" role="tab" data-tab="blank">✍️ Type it myself</button>
+    </div>
+    {% if editor_ai %}
+    <div class="re-tab" data-panel="write">
+      <p class="b-muted">Type the dish, and the AI fills in everything. You check it before anyone sees it.</p>
+      <div class="re-line"><input type="text" id="re-write-name" maxlength="80" placeholder="e.g. Gongura Pappu" aria-label="Dish name"><input type="text" id="re-write-wish" maxlength="200" placeholder="Anything special? e.g. serves 4, less oil (optional)" aria-label="Anything special"></div>
+      <button type="button" class="re-btn primary" id="re-write-go">✨ Write the recipe</button>
+    </div>
+    {% endif %}
+    <div class="re-tab" data-panel="paste" hidden>
+      <p class="b-muted">Paste it as it is, from WhatsApp, a website or your notes{% if editor_ai %}, in any language{% endif %}. Ballava finds the ingredients, amounts, steps and timers.</p>
+      <textarea id="re-paste" rows="9" aria-label="Recipe text" placeholder="Lemon Rice&#10;Serves 3, 20 mins&#10;&#10;Ingredients&#10;2 cups cooked rice&#10;2 tbsp peanuts&#10;1 lemon&#10;&#10;Method&#10;1. Fry the peanuts for 2 minutes.&#10;2. Mix in the rice and lemon juice."></textarea>
+      <button type="button" class="re-btn primary" id="re-paste-go">📋 Fill in the form</button>
+    </div>
+    <div class="re-tab" data-panel="copy" hidden>
+      <p class="b-muted">Start from a recipe that is already in Ballava.</p>
+      <div class="re-line"><input type="text" id="re-copy" list="re-copy-list" placeholder="Type a recipe name" aria-label="Recipe to start from"><datalist id="re-copy-list"></datalist></div>
+      <button type="button" class="re-btn primary" id="re-copy-new">Make a new recipe like it</button>
+      <button type="button" class="re-btn" id="re-copy-edit">Change that recipe for everyone</button>
+    </div>
+  </section>
+  {% endif %}
+
+  <div class="re-cols">
+    <div class="re-main">
+      <section class="b-card" id="re-dish">
+        <h3>1. The dish</h3>
+        <div class="re-field wide"><label for="id_name">Name</label>{{ f.name }}{{ f.name.errors }}</div>
+        <div class="re-grid dish">
+          <div class="re-field"><label for="id_alt">Other name (optional)</label>{{ f.alt }}{{ f.alt.errors }}</div>
+          <div class="re-field"><label for="id_cuisine">Cuisine</label><input type="text" name="cuisine" id="id_cuisine" maxlength="40" list="re-cuisines" placeholder="e.g. Andhra" value="{{ f.cuisine.value|default_if_none:'' }}">{{ f.cuisine.errors }}<datalist id="re-cuisines">{% for c in editor_cuisines %}<option value="{{ c }}">{% endfor %}</datalist></div>
+          <div class="re-field"><label for="id_time">Minutes</label>{{ f.time }}{{ f.time.errors }}</div>
+          <div class="re-field"><label for="id_serves">Serves</label>{{ f.serves }}{{ f.serves.errors }}</div>
+        </div>
+        <div class="re-field"><span class="re-label" id="re-meals-label">Meals</span><div class="re-chips" id="re-meals" role="group" aria-labelledby="re-meals-label"></div><div class="re-raw">{{ f.meal }}<p class="help">Comma separated: breakfast, lunch, dinner, snack, side, dessert</p></div>{{ f.meal.errors }}</div>
+        <div class="re-field"><span class="re-label" id="re-spice-label">Spice</span><div class="re-chips" id="re-spice" role="group" aria-labelledby="re-spice-label"></div><div class="re-raw">{{ f.spice }}</div>{{ f.spice.errors }}</div>
+      </section>
+
+      <section class="b-card" id="re-ingredients">
+        <h3>2. Ingredients</h3>
+        <p class="b-muted">Type a name in any language you use (tamatar, pyaz, kandi pappu). You can also type a whole line, like “2 cups toor dal”, or paste a list. Salt and water are always there, so leave them out.</p>
+        <ol class="re-list" id="re-ing-list"></ol>
+        <button type="button" class="re-btn" id="re-ing-add">＋ Add an ingredient</button>
+        <div class="re-raw">{{ f.ingredients }}<p class="help">{{ f.ingredients.help_text }}</p></div>{{ f.ingredients.errors }}
+        <datalist id="re-amounts"></datalist>
+      </section>
+
+      <section class="b-card" id="re-steps">
+        <h3>3. Steps</h3>
+        <p class="b-muted">One step per box. Write “for 5 minutes” or “3 whistles”, and the timer or whistle counter is added for you. Press Enter for the next step.</p>
+        <ol class="re-list" id="re-step-list"></ol>
+        <button type="button" class="re-btn" id="re-step-add">＋ Add a step</button>
+        <div class="re-raw">{{ f.steps }}<p class="help">{{ f.steps.help_text }}</p></div>{{ f.steps.errors }}
+      </section>
+
+      <section class="b-card" id="re-extra">
+        <h3>4. Extras <small class="b-muted">(optional)</small></h3>
+        <div class="re-field"><span class="re-label" id="re-tags-label">Good for</span><div class="re-chips" id="re-tags" role="group" aria-labelledby="re-tags-label"></div><div class="re-raw">{{ f.tags }}<p class="help">{{ f.tags.help_text }}</p></div>{{ f.tags.errors }}</div>
+        <div class="re-field wide"><label for="id_prep">Plan ahead (the night before)</label>{{ f.prep }}{{ f.prep.errors }}</div>
+        <div class="re-field wide"><label for="id_safety">Food safety note</label>{{ f.safety }}{{ f.safety.errors }}</div>
+        <div class="re-field wide"><label for="id_tip">Tip</label>{{ f.tip }}{{ f.tip.errors }}</div>
+        <details class="re-more"{% if f.recipe_id.errors %} open{% endif %}><summary>Advanced</summary>
+          <div class="re-field"><label for="id_recipe_id">Id</label>{{ f.recipe_id }}{{ f.recipe_id.errors }}<p class="help">Made from the name by itself, so you can leave it empty. A built-in recipe's id replaces that recipe.</p></div>
+        </details>
+      </section>
+    </div>
+
+    <aside class="re-side">
+      <section class="b-card" id="re-check" aria-live="polite"><h3>Checks</h3><p class="b-muted">Calories and checks appear here as you type.</p></section>
+      <div class="re-actions">
+        <button type="submit" class="re-btn" name="_continue" value="1">💾 Save draft</button>
+        {% if editor_can_publish %}<button type="submit" class="re-btn primary" name="_publish" value="1">🚀 Publish</button>
+        {% else %}<button type="submit" class="re-btn primary" name="_review" value="1">📨 Send to review</button>{% endif %}
+        {% if not add and has_delete_permission %}<a class="re-delete" href="{% url opts|admin_urlname:'delete' original.pk|admin_urlquote %}">Delete</a>{% endif %}
+      </div>
+      <p class="b-muted re-foot">{% if editor_can_publish %}Publishing shows it to users straight away. A draft is only seen by admins.{% else %}Another admin checks it, and then it goes live.{% endif %}</p>
+    </aside>
+  </div>
+
+  <dialog class="re-dialog" id="re-new-ing" aria-labelledby="re-new-title">
+    <h3 id="re-new-title">New ingredient</h3>
+    <p class="b-muted">It joins the ingredient list, and families can add it to their kitchen too. Please check diet and allergens: they decide who is shown this dish.</p>
+    <div class="re-grid">
+      <label class="re-field">Name<input type="text" data-k="name" maxlength="60"></label>
+      <label class="re-field">Kind<select data-k="category"></select></label>
+      <label class="re-field">Diet<select data-k="diet"><option value="veg">Vegetarian</option><option value="egg">Egg</option><option value="nonveg">Meat or fish</option></select></label>
+    </div>
+    <div class="re-field"><span class="re-label">Contains</span><div class="re-chips" data-k="allergens"></div></div>
+    <label class="re-field">Other names people type<input type="text" data-k="aliases" maxlength="300" placeholder="e.g. gongura, ambadi, pulicha keerai"></label>
+    <details class="re-more"><summary>Calories per 100 g (so recipes can count it)</summary>
+      <div class="re-grid tight">
+        <label class="re-field">kcal<input type="number" step="any" min="0" data-k="kcal"></label>
+        <label class="re-field">Protein g<input type="number" step="any" min="0" data-k="protein"></label>
+        <label class="re-field">Carbs g<input type="number" step="any" min="0" data-k="carbs"></label>
+        <label class="re-field">Fat g<input type="number" step="any" min="0" data-k="fat"></label>
+        <label class="re-field">Fibre g<input type="number" step="any" min="0" data-k="fibre"></label>
+        <label class="re-field">Grams in a cup<input type="number" step="any" min="0" data-k="grams_per_cup"></label>
+        <label class="re-field">Grams in a piece<input type="number" step="any" min="0" data-k="grams_per_piece"></label>
+        <label class="re-field">Keeps (days)<input type="number" step="1" min="0" data-k="shelf_days"></label>
+      </div>
+    </details>
+    <p class="re-error" role="alert"></p>
+    <div class="re-line end">
+      {% if editor_ai %}<button type="button" class="re-btn" data-do="ai">✨ Fill in with AI</button>{% endif %}
+      <button type="button" class="re-btn" data-do="cancel">Cancel</button>
+      <button type="button" class="re-btn primary" data-do="save">Add ingredient</button>
+    </div>
+  </dialog>
+</div>
+{% endwith %}{% endif %}
+{% endblock %}
+
+{% block submit_buttons_bottom %}{% if not adminform.form.ingredients %}{{ block.super }}{% endif %}{% endblock %}

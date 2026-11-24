@@ -9,7 +9,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from playwright.sync_api import expect
 
-from .e2e_helpers import DESKTOP, browser, device, diary, errors, more, no_sideways_scroll, open_chef, site, snap, tab  # noqa: F401
+from .e2e_helpers import DESKTOP, PHONE, browser, device, diary, errors, more, no_sideways_scroll, open_chef, site, snap, tab  # noqa: F401
 
 pytestmark = pytest.mark.e2e
 
@@ -661,32 +661,105 @@ def test_admin_publishes_a_recipe_and_users_see_it(page, device, site):
     assert 'Dadaji' not in p.content(), 'admin overview shows no family details'
     snap(p, '30-admin-overview')
 
+    # Paste a recipe as it came on WhatsApp: the form fills itself in.
     p.goto(site + 'admin/kitchen/recipe/add/')
-    p.get_by_label('Id:', exact=True).fill('gongura_pappu')
-    p.get_by_label('Name:', exact=True).fill('Admin Test Pappu')
-    p.get_by_label('Cuisine:', exact=True).fill('Andhra')
-    p.get_by_label('Ingredients:', exact=True).fill('toor_dal:1 cup\nmysteryleaf:1 bunch')
-    p.get_by_label('Steps:', exact=True).fill('Pressure cook the dal well. |3w\nAdd the tadka and serve hot.')
-    p.get_by_role('button', name='Save', exact=True).click()
-    p.get_by_text(re.compile('Unknown ingredient "mysteryleaf"')).wait_for()
-    p.locator('#result_list').get_by_role('link', name='Admin Test Pappu').click()
-    p.get_by_label('Ingredients:', exact=True).fill('toor_dal:1 cup\nspinach:1 bunch\nturmeric:1/2 tsp')
-    p.get_by_role('button', name='Save', exact=True).click()
-
-    def run_action(label):
-        p.locator('tr', has_text='Admin Test Pappu').get_by_role('checkbox').check()
-        p.locator('select[name=action]').select_option(label=label)
-        p.get_by_role('button', name=re.compile('^(Go|Run)$')).click()
-
-    run_action('Send to review')
-    p.get_by_text(re.compile('sent to review')).wait_for()
-    run_action('Publish (users see it straight away)')
-    p.get_by_text(re.compile('Users see it now')).wait_for()
+    p.get_by_role('tab', name='Paste a recipe').click()
+    p.get_by_label('Recipe text').fill("""Admin Test Pappu Recipe
+Serves 4, Time: 30 mins
+Ingredients
+Toor dal - 1 cup
+Mysteryleaf - 2 bunches
+1 tbsp ghee or oil
+Salt to taste
+Method
+1. Pressure cook the dal for 3 whistles.
+2. Cook the leaves for 8-10 minutes and mix.""")
+    p.get_by_role('button', name='Fill in the form').click()
+    p.get_by_text('Filled in from your text').wait_for()
+    assert p.locator('#id_name').input_value() == 'Admin Test Pappu'
+    assert p.locator('#id_serves').input_value() == '4'
+    expect(p.locator('#re-ing-list .re-chip')).to_have_count(4)  # dal, mysteryleaf, ghee or oil
+    assert p.get_by_label('Timer number for step 1').input_value() == '3'
+    assert p.get_by_label('Timer number for step 2').input_value() == '10'
+    # The checks say what's wrong in plain words, and Publish won't go until it's right.
+    p.get_by_text('1 thing to fix before publishing').wait_for()
+    p.get_by_role('button', name='Publish').click()
+    p.locator('#re-msg').get_by_text(re.compile('"mysteryleaf" is not in the ingredient list yet')).wait_for()
+    snap(p, '31-admin-recipe-fix')
+    # Add the missing ingredient without leaving the recipe.
+    p.get_by_role('button', name='Add to the ingredient list').click()
+    dialog = p.get_by_role('dialog', name='New ingredient')
+    dialog.get_by_label('Other names people type').fill('rahasyam')
+    dialog.get_by_text('Calories per 100 g').click()
+    dialog.get_by_label('kcal').fill('30')
+    snap(p, '31-admin-new-ingredient')
+    dialog.get_by_role('button', name='Add ingredient').click()
+    p.get_by_role('heading', name='Ready to publish').wait_for()
+    expect(p.locator('#re-msg')).to_be_empty()
+    # Type one more ingredient by its Telugu name, and choose a meal, a tag and the spice.
+    p.get_by_role('button', name='Add an ingredient').click()
+    p.get_by_role('combobox', name='Ingredient', exact=True).fill('ullipaya')
+    p.get_by_role('option', name='Onion').click()
+    p.get_by_label('Amount of ingredient 4').fill('1 medium, chopped')
+    p.get_by_label('Amount of ingredient 4').press('Enter')  # Enter starts the next ingredient; it never saves by accident
+    p.get_by_role('combobox', name='Ingredient', exact=True).fill('2 tsp jeera')
+    p.get_by_role('combobox', name='Ingredient', exact=True).press('Enter')
+    expect(p.locator('#re-ing-list .re-chip', has_text='Cumin')).to_be_visible()
+    assert p.get_by_label('Amount of ingredient 5').input_value() == '2 tsp'
+    p.get_by_label('Move ingredient 5 up').click()
+    assert p.get_by_label('Amount of ingredient 4').input_value() == '2 tsp'
+    p.get_by_role('group', name='Meals').get_by_role('button', name='Breakfast').click()
+    p.get_by_role('group', name='Spice').get_by_role('button', name='Mild').click()
+    p.locator('#re-check').get_by_role('button', name=re.compile('Gluten-free')).click()
+    p.get_by_role('group', name='Good for').get_by_role('button', name='Kid-friendly').click()
+    p.get_by_label('Step 2', exact=True).press('Enter')
+    p.get_by_label('Step 3', exact=True).fill('Simmer for 5 minutes and serve hot.')
+    p.get_by_label('Step 3', exact=True).blur()
+    assert p.get_by_label('Timer number for step 3').input_value() == '5'
+    p.locator('#re-check').get_by_text('kcal a serving').wait_for()
+    p.evaluate('window.scrollTo(0, 0)')
     snap(p, '31-admin-recipe')
+    no_sideways_scroll(p, 'recipe editor')
+    p.get_by_role('button', name='Publish').click()
+    p.get_by_text('Users see it now').wait_for()
+    snap(p, '31-admin-recipe-published')
 
-    page.goto(site + '#/recipe/gongura_pappu')
+    from kitchen.models import Recipe
+    saved = Recipe.objects.get(recipe_id='admin_test_pappu')
+    assert saved.ingredients.splitlines() == ['toor_dal:1 cup', 'mysteryleaf:2 bunches', 'ghee|oil:1 tbsp', 'cumin:2 tsp', 'onion:1 medium, chopped']
+    assert saved.steps.splitlines() == ['Pressure cook the dal for 3 whistles. |3w', 'Cook the leaves for 8-10 minutes and mix. |10m', 'Simmer for 5 minutes and serve hot. |5m']
+    assert saved.meal == 'breakfast, lunch, dinner' and saved.spice == 1 and saved.tags == 'kid-friendly, gluten-free'
+
+    # Edit it later, on a phone.
+    small = p.context.browser.new_context(**PHONE, storage_state=p.context.storage_state()).new_page()
+    small.goto(f'{site}admin/kitchen/recipe/{saved.pk}/change/')
+    small.get_by_role('heading', name='Ready to publish').wait_for()
+    expect(small.locator('#re-ing-list .re-row')).to_have_count(5)
+    no_sideways_scroll(small, 'recipe editor on a phone')
+    edges = small.locator('.re-row').evaluate_all('rows => rows.flatMap(r => [...r.children].map(c => c.getBoundingClientRect().right))')
+    assert max(edges) <= 390, 'every box of every row fits the phone'
+    small.locator('#re-ingredients').scroll_into_view_if_needed()
+    snap(small, '31-admin-recipe-phone')
+    small.locator('#id_name').fill('Admin Test Pappu Deluxe')
+    small.get_by_role('button', name='Save draft').click()
+    small.get_by_text('was changed successfully').wait_for()
+    small.context.close()
+
+    # Copy an existing recipe, or change it for everyone.
+    p.goto(site + 'admin/kitchen/recipe/add/')
+    p.get_by_role('tab', name='Copy a recipe').click()
+    p.get_by_label('Recipe to start from').fill('Kanda Poha')
+    p.get_by_role('button', name='Make a new recipe like it').click()
+    p.get_by_text('Copied. Give it its own name').wait_for()
+    assert p.locator('#id_name').input_value() == 'Kanda Poha (copy)'
+    p.once('dialog', lambda d: d.accept())  # leaving without saving asks first
+    p.goto(site + 'admin/kitchen/recipe/add/?copy_from=kanda_poha')
+    p.get_by_role('heading', name='Edit Kanda Poha').wait_for()
+    assert p.locator('#id_name').input_value() == 'Kanda Poha'
+
+    page.goto(site + '#/recipe/admin_test_pappu')
     page.reload()
-    page.get_by_role('heading', name=re.compile('Admin Test Pappu')).wait_for()
+    page.get_by_role('heading', name=re.compile('Admin Test Pappu$')).wait_for()  # the published version, not the new draft
 
     p.goto(site + 'admin/kitchen/announcement/add/')
     p.get_by_label('Text:', exact=True).fill('Navratri recipes are here!')

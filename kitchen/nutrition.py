@@ -134,6 +134,8 @@ def oil_per_serving(recipe):
     steps = ' '.join(s.get('text', '') for s in recipe.get('steps') or []).lower()
     if DEEP_FRY.search(steps):
         return 3.0
+    if any(it['options'][0] == 'oil' and not it.get('optional') for it in recipe.get('ingredients') or [] if it.get('options')):
+        return 0.0  # the recipe says how much oil, so it's already counted
     lists_fat = any(it['options'][0] in FATS for it in recipe.get('ingredients') or [] if it.get('options'))
     if re.search(r'\boil\b', steps) or (not lists_fat and FRYING.search(steps)):
         return 1.5

@@ -325,6 +325,38 @@ def invent_recipe(pantry=(), household=(), wish='', meal=None, avoid=None, fasti
     return extract_json(call_ai(invent_system(), content, max_tokens=6000))
 
 
+def read_system():
+    return f"""You turn a recipe that someone wrote down (in any language) into the app's format, in English. Keep to what it says: the same dish,
+ingredients, amounts and steps. Don't add or drop ingredients. If it doesn't say the time or how many it serves, estimate them.
+Mention pressure-cooker whistles in the step text. Set "requested" to true.
+{SAFETY_RULES}
+When an ingredient is one of these, use exactly this name: {ingredient_names()}.
+Reply with ONLY a JSON object, no other text, in exactly this shape:
+{RECIPE_SHAPE}"""
+
+
+def read_recipe(text):
+    """A pasted recipe, for the admin's recipe editor."""
+    return extract_json(call_ai(read_system(), 'The recipe:\n' + str(text)[:8000], max_tokens=6000))
+
+
+INGREDIENT_SYSTEM = """You fill in the details of ONE cooking ingredient for an Indian home-cooking app. Values are per 100 g, as it goes into the pot
+(dry for dals and flours). Reply with ONLY JSON, no other text:
+{"name": "tidy English name", "category": one of CATEGORIES, "diet": "veg" or "egg" or "nonveg", "allergens": any of ["dairy", "gluten", "nuts", "egg", "seafood"],
+ "aliases": ["Hindi, Telugu, Tamil and other names people type, in English letters"], "kcal": number, "protein": grams, "carbs": grams, "fat": grams, "fibre": grams,
+ "grams_per_cup": grams in a 240 ml cup or null, "grams_per_piece": grams in one medium piece or null, "shelf_days": days it keeps, or null if months}
+If it is not something people cook with, reply {"name": null}."""
+
+
+def describe_ingredient(name):
+    """Category, other names and nutrition of a new ingredient, for the admin to check and save."""
+    from .data.ingredients import CATEGORIES
+    data = extract_json(call_ai(INGREDIENT_SYSTEM.replace('CATEGORIES', json.dumps(CATEGORIES)), f'Ingredient: {str(name)[:60]}', max_tokens=1500))
+    if not data.get('name'):
+        raise ApiError(422, "That doesn't look like a cooking ingredient.")
+    return data
+
+
 ESTIMATE_SYSTEM = """You estimate the nutrition of ONE ordinary Indian home or restaurant serving of the food named.
 Reply with ONLY JSON: {"name": "tidy name of the food", "kcal": number, "protein": grams, "carbs": grams, "fat": grams}.
 If it isn't a food, reply {"kcal": null}."""

@@ -76,3 +76,13 @@ def test_ai_recipes_get_calories_and_safe_labels():
     assert odd['diet'] == 'nonveg', 'words in unknown ingredients are checked too, whatever the AI says'
     assert {'seafood', 'nuts', 'dairy'} <= set(odd['allergens'])
     assert odd['nutrition']['kcal'] == 420 and odd['nutrition']['source'] == 'ai', "unknown ingredients: use the AI's estimate"
+
+
+def test_oil_the_recipe_lists_is_not_counted_twice():
+    from kitchen.engine import prepare_recipe
+    base = {'id': 'x', 'name': 'X', 'meal': ['lunch'], 'time': 10, 'serves': 2, 'spice': 1, 'steps': ['Heat the oil and fry the onion.', 'Serve it hot.']}
+    listed = prepare_recipe({**base, 'ing': ['onion:2', 'oil:2 tbsp']})['nutrition']
+    unlisted = prepare_recipe({**base, 'ing': ['onion:2']})['nutrition']
+    assert listed['oilTsp'] == 0 and unlisted['oilTsp'] == 1.5
+    assert 2 * 14 * 8.8 * 0.9 < listed['totalKcal'] - 2 * 110 * 0.4 < 2 * 14 * 9.2 * 1.1, 'two tablespoons of oil, once'
+    assert prepare_recipe({**base, 'ing': ['onion:2', 'oil:for frying'], 'steps': ['Deep-fry the onion.', 'Serve it hot.']})['nutrition']['oilTsp'] == 3, 'deep frying soaks up more'

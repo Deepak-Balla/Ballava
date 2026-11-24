@@ -4,6 +4,7 @@ What admins can do: add and edit recipes (draft -> review -> publish, with safet
 add ingredients and Bachao fixes, post announcements, keep the festival calendar, and disable users.
 What admins cannot see: any family's kitchen, members, diets, health goals or meal diary.
 """
+import json
 from collections import Counter
 from datetime import timedelta
 from urllib.parse import urlencode
@@ -11,23 +12,49 @@ from urllib.parse import urlencode
 from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
-from django.contrib.admin.models import LogEntry
+from django.contrib.admin.models import ADDITION, CHANGE, LogEntry
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import Group, User
 from django.db.models import Count, Sum
-from django.http import Http404, HttpResponse
+from django.core.exceptions import PermissionDenied
+from django.http import Http404, HttpResponse, HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
+from django.utils.html import format_html
 from django.utils import timezone
 
-from . import catalog, engine
+from . import ai, api, catalog, engine, recipe_editor
+from .data.ingredients import CATEGORIES
 from .data.recipes import RECIPES
 from .models import AiUsage, Announcement, FamilyData, Festival, HiddenRecipe, Household, Housekeeping, Ingredient, Recipe, Rescue
-from .security import clear_limit, client_ip, limited
+from .security import ApiError, clear_limit, client_ip, limited
 
 BUILT_IN = {r['id']: r for r in RECIPES}
 DIETS = {'veg': 'Vegetarian', 'egg': 'Egg', 'nonveg': 'Non-veg'}
 SPICE = {1: 'Mild', 2: 'Medium', 3: 'Hot'}
+
+
+# ---------------------------------------------------------------- publishing
+def can_publish(user, recipe):
+    """Superusers publish straight away. Other admins' recipes are reviewed first."""
+    return user.has_perm('kitchen.change_recipe') and (user.is_superuser or recipe.status == Recipe.REVIEW)
+
+
+def publish_recipe(site, request, recipe):
+    """Makes it live if it passes every check. Tells the admin how it went; returns True when it's live."""
+    link = format_html('<a href="{}">{}</a>', reverse('admin:recipe_detail', args=[recipe.recipe_id]), recipe.name)
+    if not can_publish(request.user, recipe):
+        messages.error(request, format_html('{} must be sent to review before publishing.', link))
+        return False
+    problems = recipe_editor.problems_of(recipe.to_raw())
+    if problems:
+        messages.error(request, format_html('{} cannot be published yet: {}', link, ' '.join(p['text'] for p in problems)))
+        return False
+    recipe.live, recipe.status = recipe.to_raw(), Recipe.PUBLISHED
+    recipe.save()
+    LogEntry.objects.log_actions(request.user.pk, [recipe], CHANGE, change_message='Published', single_object=True)
+    messages.success(request, format_html('{} is published. Users see it now.', link))
+    return True
 
 
 # ---------------------------------------------------------------- the recipe book (every recipe, in one place)
@@ -88,6 +115,8 @@ class BallavaAdminSite(admin.AdminSite):
         return [
             path('recipe-book/', self.admin_view(self.recipe_book), name='recipe_book'),
             path('recipe-book/<slug:recipe_id>/', self.admin_view(self.recipe_detail), name='recipe_detail'),
+            path('recipe-book/<slug:recipe_id>/publish/', self.admin_view(self.recipe_publish), name='recipe_publish'),
+            path('recipe-tools/<slug:tool>/', self.admin_view(self.recipe_tools), name='recipe_tools'),
             path('ingredient-book/', self.admin_view(self.ingredient_book), name='ingredient_book'),
         ] + super().get_urls()
 
@@ -107,7 +136,7 @@ class BallavaAdminSite(admin.AdminSite):
             ('⏳', 'Waiting for review', Recipe.objects.filter(status=Recipe.REVIEW).count(), 'warn' if review else ''),
             ('✨', 'AI calls, 30 days', AiUsage.objects.filter(day__gte=month_ago).aggregate(n=Sum('calls'))['n'] or 0, ''),
         ]
-        drafts = [(r, engine.validate_recipe(r.to_raw())) for r in Recipe.objects.filter(status=Recipe.DRAFT).order_by('-updated_at')[:6]]
+        drafts = [(r, recipe_editor.problems_of(r.to_raw())) for r in Recipe.objects.filter(status=Recipe.DRAFT).order_by('-updated_at')[:6]]
         entries = book_entries()
         live = [e for e in entries if e['state'] == 'live']
         kcals = [e['kcal'] for e in live if e['kcal'] is not None]
@@ -177,13 +206,117 @@ class BallavaAdminSite(admin.AdminSite):
                     else reverse('admin:kitchen_recipe_add') + '?' + urlencode({'copy_from': recipe_id}))
         return TemplateResponse(request, 'kitchen/recipe_detail.html', {
             **self.each_context(request), 'title': r['name'], 'e': e, 'lines': lines,
-            'problems': engine.validate_recipe(row.to_raw()) if row else [],
+            'problems': recipe_editor.problems_of(row.to_raw()) if row else [],
+            'publish': bool(row) and row.status != Recipe.PUBLISHED and can_publish(request.user, row),
             'can_change': request.user.has_perm('kitchen.change_recipe') and request.user.has_perm('kitchen.add_recipe'),
             'edit_url': edit_url,
             'hide_url': (reverse('admin:kitchen_hiddenrecipe_add') + '?' + urlencode({'recipe_id': recipe_id}))
             if request.user.has_perm('kitchen.add_hiddenrecipe') else None,
             'hidden_url': reverse('admin:kitchen_hiddenrecipe_delete', args=[hidden.pk]) if hidden else None,
         })
+
+    def recipe_publish(self, request, recipe_id):
+        """The Publish button on a recipe's page."""
+        if request.method != 'POST':
+            return HttpResponseNotAllowed(['POST'])
+        recipe = Recipe.objects.filter(recipe_id=recipe_id).first()
+        if not recipe:
+            raise Http404('No recipe with that id.')
+        if not request.user.has_perm('kitchen.change_recipe'):
+            raise PermissionDenied
+        publish_recipe(self, request, recipe)
+        return HttpResponseRedirect(reverse('admin:recipe_detail', args=[recipe_id]))
+
+    # ---- What the recipe editor asks while an admin types (kitchen/static/kitchen/recipe_editor.js)
+    def recipe_tools(self, request, tool):
+        if request.method != 'POST':
+            return HttpResponseNotAllowed(['POST'])
+        if not (request.user.has_perm('kitchen.add_recipe') or request.user.has_perm('kitchen.change_recipe')):
+            raise PermissionDenied
+        action = {'check': self._tool_check, 'read': self._tool_read, 'lines': self._tool_lines, 'write': self._tool_write, 'source': self._tool_source,
+                  'ingredient-guess': self._tool_guess, 'ingredient-add': self._tool_add_ingredient}.get(tool)
+        if not action:
+            raise Http404
+        try:
+            body = json.loads(request.body or '{}')
+            if not isinstance(body, dict):
+                raise ValueError('Unexpected request.')
+            catalog.live()
+            return JsonResponse(action(request, body))
+        except ApiError as err:
+            return JsonResponse({'error': err.message}, status=err.status)
+        except (ValueError, KeyError, TypeError) as err:
+            return JsonResponse({'error': str(err) if type(err) is ValueError else 'That could not be read.'}, status=400)
+
+    def _tool_check(self, request, body):
+        text = lambda k, n=4000: str(body.get(k) or '')[:n]  # noqa: E731
+
+        def number(k):
+            try:
+                return int(float(body.get(k)))
+            except (TypeError, ValueError):
+                return 0
+        own = text('recipe_id', 40)
+        draft = Recipe(recipe_id=own or 'new_recipe', name=text('name', 80), cuisine=text('cuisine', 40), meal=text('meal', 80), tags=text('tags', 200), time=number('time'),
+                       serves=number('serves'), spice=number('spice'), ingredients=text('ingredients'), steps=text('steps', 12000), safety=text('safety', 400))
+        return recipe_editor.check(draft.to_raw(), own)
+
+    def _tool_read(self, request, body):
+        """A pasted recipe. The AI reads it when it's on; otherwise (or when it's busy) Ballava reads it by itself."""
+        text = str(body.get('text') or '').strip()
+        if len(text) < 15:
+            raise ValueError('Please paste the whole recipe.')
+        note = None
+        if ai.ai_key() and body.get('ai') is not False:
+            try:
+                api._ai_allowed(request)
+                return {'fields': recipe_editor.from_ai(ai.read_recipe(text)), 'source': 'ai'}
+            except (ApiError, ValueError) as err:
+                note = f'The AI could not read it ({getattr(err, "message", err)}), so Ballava read it by itself.'
+        fields = recipe_editor.read_text(text)
+        if not fields['ingredients'] and not fields['steps']:
+            raise ValueError("No ingredients or steps were found in that. Please paste the whole recipe.")
+        return {'fields': fields, 'source': 'text', 'note': note}
+
+    def _tool_lines(self, request, body):
+        """Several lines pasted into an ingredient box or a step box."""
+        lines = [x for x in str(body.get('text') or '')[:8000].splitlines() if x.strip()]
+        return {'ingredients': recipe_editor.drop_basics([r for x in lines for r in recipe_editor.read_ingredient(x)])[:40],
+                'steps': [recipe_editor.read_step(x) for x in lines][:25]}
+
+    def _tool_write(self, request, body):
+        """The AI writes a recipe from its name."""
+        name = str(body.get('name') or '').strip()[:80]
+        if not name:
+            raise ValueError('Please type the name of the dish.')
+        api._ai_allowed(request)
+        wish = f'{name}. {str(body.get("wish") or "").strip()[:200]}'.strip()
+        return {'fields': recipe_editor.from_ai(ai.invent_recipe(wish=wish)), 'source': 'ai'}
+
+    def _tool_source(self, request, body):
+        """An existing recipe, to copy into a new one."""
+        e = next((x for x in book_entries() if x['id'] == body.get('id')), None)
+        if not e:
+            raise ValueError('That recipe was not found.')
+        raw = e['row'].to_raw() if e['row'] else BUILT_IN[e['id']]
+        return {'fields': {**recipe_editor.fields_of(raw), 'recipe_id': '', 'name': f"{raw['name']} (copy)"}, 'source': 'copy'}
+
+    def _tool_guess(self, request, body):
+        """Details for a new ingredient: from its name, or from the AI."""
+        name = str(body.get('name') or '').strip()[:60]
+        if body.get('ai') is not True:
+            return {'fields': recipe_editor.guess_ingredient(name)}
+        api._ai_allowed(request)
+        return {'fields': recipe_editor.clean_ingredient(ai.describe_ingredient(name))}
+
+    def _tool_add_ingredient(self, request, body):
+        if not request.user.has_perm('kitchen.add_ingredient'):
+            raise ApiError(403, 'Your account cannot add ingredients.')
+        made, id_ = recipe_editor.new_ingredient(body)
+        if made:
+            LogEntry.objects.log_actions(request.user.pk, [made], ADDITION, change_message='Added from the recipe editor', single_object=True)
+            catalog.live()
+        return {'ingredient': next(i for i in recipe_editor.ingredient_list() if i['id'] == id_), 'existed': not made}
 
     ING_SORTS = {'name': ('Name', lambda i: i['name'].lower()), 'kcal': ('Most calories', lambda i: -(i['n'] or {}).get('kcal', -1)),
                  'protein': ('Most protein', lambda i: -(i['n'] or {}).get('protein', -1)), 'used': ('Most used', lambda i: -i['used'])}
@@ -210,11 +343,6 @@ admin_site = BallavaAdminSite(name='admin')
 
 # ---------------------------------------------------------------- recipes
 class RecipeForm(forms.ModelForm):
-    copy_from = forms.ChoiceField(
-        required=False, label='Start from a built-in recipe',
-        choices=[('', 'No, start empty')] + sorted(((k, v['name']) for k, v in BUILT_IN.items()), key=lambda c: c[1]),
-        help_text='Fills in everything from that recipe and keeps its id, so your version replaces it once published.')
-
     class Meta:
         model = Recipe
         exclude = ['status', 'live']
@@ -222,82 +350,72 @@ class RecipeForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if self.instance.pk:
-            del self.fields['copy_from']
-        else:
-            # These are filled in from the built-in recipe when one is chosen, so check them in clean() instead.
-            for name in ('recipe_id', 'name', 'meal', 'ingredients', 'steps'):
-                self.fields[name].required = False
+        self.fields['recipe_id'].required = False  # made from the name
+        # A draft can be saved half-finished. Publishing checks everything.
+        for name in ('meal', 'ingredients', 'steps'):
+            self.fields[name].required = False
 
     def clean(self):
         data = super().clean()
-        source = BUILT_IN.get(data.get('copy_from') or '')
-        if source:
-            data.update(recipe_id=source['id'], name=source['name'], alt=source.get('alt', ''), cuisine=source.get('cuisine', ''),
-                        meal=', '.join(source['meal']), time=source['time'], serves=source['serves'], spice=source['spice'],
-                        tags=', '.join(source.get('tags', [])), ingredients='\n'.join(source['ing']), steps='\n'.join(source['steps']),
-                        prep=source.get('prep', ''), safety=source.get('safety', ''), tip=source.get('tip', ''))
-            if Recipe.objects.filter(recipe_id=source['id']).exists():
-                raise forms.ValidationError('There is already an edited version of that recipe. Edit that one instead.')
-        for name in ('recipe_id', 'name', 'meal', 'ingredients', 'steps'):
-            if not data.get(name):
-                self.add_error(name, 'This field is required.')
+        if not data.get('recipe_id') and 'recipe_id' not in self.errors and data.get('name'):
+            data['recipe_id'] = self.instance.recipe_id or recipe_editor.make_id(data['name'])
         return data
-
-    def save(self, commit=True):
-        for field in ('recipe_id', 'name', 'alt', 'cuisine', 'meal', 'time', 'serves', 'spice', 'tags', 'ingredients', 'steps', 'prep', 'safety', 'tip'):
-            if field in self.cleaned_data:
-                setattr(self.instance, field, self.cleaned_data[field])
-        return super().save(commit)
 
 
 @admin.register(Recipe, site=admin_site)
 class RecipeAdmin(admin.ModelAdmin):
     form = RecipeForm
-    list_display = ['name', 'recipe_id', 'cuisine', 'meal', 'time', 'kcal_per_serving', 'status', 'is_live', 'replaces_built_in', 'updated_at']
+    change_form_template = 'kitchen/recipe_form.html'
+    list_display = ['name', 'cuisine', 'meal', 'time', 'kcal_per_serving', 'status', 'is_live', 'replaces_built_in', 'updated_at']
     list_filter = ['status']
     search_fields = ['name', 'recipe_id', 'cuisine']
-    actions = ['send_to_review', 'publish', 'back_to_draft']
-    readonly_fields = ['status_note', 'nutrition_preview']
+    actions = ['publish', 'send_to_review', 'back_to_draft']
+    fields = ['recipe_id', 'name', 'alt', 'cuisine', 'meal', 'time', 'serves', 'spice', 'tags', 'ingredients', 'steps', 'prep', 'safety', 'tip']
 
-    def get_fieldsets(self, request, obj=None):
-        main = ['recipe_id', 'name', 'alt', 'cuisine', 'meal', 'time', 'serves', 'spice', 'tags', 'ingredients', 'steps', 'prep', 'safety', 'tip']
-        sets = [(None, {'fields': ['status_note'] + main if obj else main})]
-        if obj:
-            sets.append(('Calories (worked out from the saved ingredients)', {'fields': ['nutrition_preview']}))
-        if not obj:
-            sets.insert(0, ('Quick start', {'fields': ['copy_from']}))
-        return sets
+    # ---- the editor page
+    def get_changeform_initial_data(self, request):
+        source = BUILT_IN.get(request.GET.get('copy_from', ''))
+        if not source:
+            return super().get_changeform_initial_data(request)
+        return {'recipe_id': source['id'], 'name': source['name'], 'alt': source.get('alt', ''), 'cuisine': source.get('cuisine', ''),
+                'meal': ', '.join(source['meal']), 'time': source['time'], 'serves': source['serves'], 'spice': source['spice'],
+                'tags': ', '.join(source.get('tags', [])), 'ingredients': '\n'.join(source['ing']), 'steps': '\n'.join(source['steps']),
+                'prep': source.get('prep', ''), 'safety': source.get('safety', ''), 'tip': source.get('tip', '')}
 
-    def _prepared(self, obj):
-        try:
-            return engine.prepare_recipe(obj.to_raw())
-        except (KeyError, ValueError, TypeError):
-            return None
+    def add_view(self, request, form_url='', extra_context=None):
+        # Editing a built-in recipe that already has an admin version opens that version.
+        existing = Recipe.objects.filter(recipe_id=request.GET.get('copy_from') or None).first()
+        if existing and request.method == 'GET':
+            return HttpResponseRedirect(reverse('admin:kitchen_recipe_change', args=[existing.pk]))
+        return super().add_view(request, form_url, extra_context)
 
+    def render_change_form(self, request, context, add=False, change=False, form_url='', obj=None):
+        catalog.live()
+        rows = {r.recipe_id: r.pk for r in Recipe.objects.all()}
+        live = engine.recipes_from(catalog.live()['recipes'], ())
+        copying = BUILT_IN.get(request.GET.get('copy_from', '')) if add else None
+        status = obj.status if obj else Recipe.DRAFT
+        context.update(
+            editor_data={
+                'ingredients': recipe_editor.ingredient_list(), 'amounts': recipe_editor.AMOUNTS, 'isNew': add and not copying, 'ai': bool(ai.ai_key()),
+                'aiName': ai.provider_label(), 'categories': CATEGORIES, 'allergens': list(engine.ALLERGENS), 'meals': recipe_editor.MEALS, 'tags': recipe_editor.TAGS,
+                'canAddIngredient': request.user.has_perm('kitchen.add_ingredient'), 'tools': reverse('admin:recipe_tools', args=['x'])[:-2],
+                'recipes': sorted(({'id': r['id'], 'name': r['name'], 'edit': reverse('admin:kitchen_recipe_change', args=[rows[r['id']]]) if r['id'] in rows
+                                    else reverse('admin:kitchen_recipe_add') + '?' + urlencode({'copy_from': r['id']})} for r in live), key=lambda r: r['name'].lower()),
+            },
+            editor_cuisines=sorted({r.get('cuisine') for r in live if r.get('cuisine')}), editor_ai=bool(ai.ai_key()), editor_copying=copying,
+            editor_status=dict(Recipe.STATUS)[status], editor_status_key=status, editor_is_live=bool(obj and obj.live), editor_replaces=bool(obj and obj.recipe_id in BUILT_IN),
+            editor_can_publish=request.user.is_superuser and self.has_change_permission(request, obj),
+            editor_meal_choices=recipe_editor.MEALS, editor_tag_choices=recipe_editor.TAGS)
+        return super().render_change_form(request, context, add, change, form_url, obj)
+
+    # ---- the list
     @admin.display(description='kcal / serving')
     def kcal_per_serving(self, obj):
-        r = self._prepared(obj)
-        return (r or {}).get('nutrition', {}).get('kcal', '-') if r else '-'
-
-    @admin.display(description='Per serving (approx.)')
-    def nutrition_preview(self, obj):
-        r = self._prepared(obj)
-        n = (r or {}).get('nutrition')
-        if not n:
+        try:
+            return engine.prepare_recipe(obj.to_raw())['nutrition'].get('kcal', '-')
+        except (KeyError, ValueError, TypeError):
             return '-'
-        text = (f"About {n['kcal']} kcal per serving: protein {round(n['protein'])} g, carbs {round(n['carbs'])} g, fat {round(n['fat'])} g, "
-                f"fibre {round(n['fibre'])} g. Whole dish about {n['totalKcal']} kcal, serves {n['serves']}.")
-        if n['oilTsp']:
-            text += f" Includes about {n['oilTsp']} tsp of cooking oil per serving."
-        if n['unknown']:
-            text += f" Not counted (unknown ingredient): {', '.join(n['unknown'])}."
-        return text
-
-    @admin.display(description='Status')
-    def status_note(self, obj):
-        live = ' Users currently see the last published version.' if obj.live else ' Users do not see it yet.'
-        return obj.get_status_display() + '.' + live + ' Use the actions on the recipe list to send it to review or publish it.'
 
     @admin.display(boolean=True, description='Live')
     def is_live(self, obj):
@@ -307,32 +425,39 @@ class RecipeAdmin(admin.ModelAdmin):
     def replaces_built_in(self, obj):
         return obj.recipe_id in BUILT_IN
 
+    # ---- saving
     def save_model(self, request, obj, form, change):
-        obj.status = Recipe.DRAFT  # any edit needs a fresh review; users keep seeing the published copy meanwhile
+        obj.status = Recipe.DRAFT  # users keep seeing the published copy until this one is published
         super().save_model(request, obj, form, change)
-        problems = engine.validate_recipe(obj.to_raw())
-        if problems:
-            self.message_user(request, 'Saved as a draft. Fix before publishing: ' + '; '.join(problems), messages.WARNING)
+        if '_publish' not in request.POST and (problems := recipe_editor.problems_of(obj.to_raw())):
+            self.message_user(request, 'Saved as a draft. Before publishing: ' + ' '.join(p['text'] for p in problems), messages.WARNING)
+
+    def _after_save(self, request, obj, default):
+        """The editor's own buttons: Publish, and Send to review."""
+        if '_publish' in request.POST:
+            live = publish_recipe(self.admin_site, request, obj)
+            return HttpResponseRedirect(reverse('admin:recipe_detail', args=[obj.recipe_id]) if live else reverse('admin:kitchen_recipe_change', args=[obj.pk]))
+        if '_review' in request.POST:
+            Recipe.objects.filter(pk=obj.pk).update(status=Recipe.REVIEW)
+            self.message_user(request, f'"{obj.name}" was sent to review.', messages.SUCCESS)
+            return HttpResponseRedirect(reverse('admin:recipe_detail', args=[obj.recipe_id]))
+        return default()
+
+    def response_add(self, request, obj, post_url_continue=None):
+        return self._after_save(request, obj, lambda: super(RecipeAdmin, self).response_add(request, obj, post_url_continue))
+
+    def response_change(self, request, obj):
+        return self._after_save(request, obj, lambda: super(RecipeAdmin, self).response_change(request, obj))
+
+    @admin.action(description='Publish (users see it straight away)')
+    def publish(self, request, queryset):
+        for recipe in queryset:
+            publish_recipe(self.admin_site, request, recipe)
 
     @admin.action(description='Send to review')
     def send_to_review(self, request, queryset):
         n = queryset.update(status=Recipe.REVIEW)
         self.message_user(request, f'{n} recipe(s) sent to review.')
-
-    @admin.action(description='Publish (users see it straight away)')
-    def publish(self, request, queryset):
-        for recipe in queryset:
-            if recipe.status != Recipe.REVIEW:
-                self.message_user(request, f'"{recipe.name}" must be sent to review before publishing.', messages.ERROR)
-                continue
-            problems = engine.validate_recipe(recipe.to_raw())
-            if problems:
-                self.message_user(request, f'"{recipe.name}" cannot be published: ' + '; '.join(problems), messages.ERROR)
-                continue
-            recipe.live, recipe.status = recipe.to_raw(), Recipe.PUBLISHED
-            recipe.save()
-            self.log_change(request, recipe, 'Published')
-            self.message_user(request, f'"{recipe.name}" is published. Users see it now.')
 
     @admin.action(description='Move back to draft')
     def back_to_draft(self, request, queryset):

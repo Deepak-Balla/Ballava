@@ -12,7 +12,8 @@
     <div class="b-split"><span class="b-badge {{ e.source_key }}">{{ e.source }}</span><span class="b-badge {{ e.state }}">{{ e.status }}</span>{% if e.pending %}<span class="b-badge review">Edits waiting to be published</span>{% endif %}</div>
   </div>
   <div class="b-actions">
-    {% if can_change %}<a class="primary" href="{{ edit_url }}">✏️ {% if e.row %}Edit this recipe{% else %}Edit (makes your own copy){% endif %}</a>{% endif %}
+    {% if publish %}<form method="post" action="{% url 'admin:recipe_publish' r.id %}">{% csrf_token %}<button type="submit" class="re-btn primary">🚀 Publish</button></form>{% endif %}
+    {% if can_change %}<a{% if not publish %} class="primary"{% endif %} href="{{ edit_url }}">✏️ {% if e.row %}Edit this recipe{% else %}Edit (makes your own copy){% endif %}</a>{% endif %}
     {% if hidden_url %}<a href="{{ hidden_url }}">👁 Show to users again</a>{% elif hide_url and e.state != 'draft' %}<a href="{{ hide_url }}">🙈 Hide from users</a>{% endif %}
     {% if e.state != 'draft' %}<a href="/#/recipe/{{ r.id }}" target="_blank" rel="noopener">📱 Open in the app</a>{% endif %}
   </div>
@@ -50,7 +51,7 @@
   </section>
 </div>
 
-{% if problems %}<div class="b-note bad"><b>Can't be published yet:</b> {{ problems|join:"; " }}</div>{% endif %}
+{% if problems %}<div class="b-note bad"><b>Can't be published yet:</b> {% for p in problems %}{{ p.text }} {% endfor %}</div>{% endif %}
 {% if r.prep %}<div class="b-note warn"><b>Plan ahead:</b> {{ r.prep }}</div>{% endif %}
 {% if r.safety %}<div class="b-note bad"><b>Food safety:</b> {{ r.safety }}</div>{% endif %}
 {% if r.tip %}<div class="b-note info"><b>Tip:</b> {{ r.tip }}</div>{% endif %}
@@ -87,7 +88,7 @@
 <section class="b-card">
   <h3>Admin version</h3>
   <p>Status: <b>{{ e.row.get_status_display }}</b> · last edited {{ e.row.updated_at|timesince }} ago.
-  {% if e.pending %}Users still see the last published version until you publish again (select it in <a href="{% url 'admin:kitchen_recipe_changelist' %}">New &amp; edited recipes</a> and use the actions menu).{% endif %}</p>
+  {% if e.pending %}{% if e.row.live %}Users still see the last published version until you publish again.{% else %}Users don't see it yet.{% endif %}{% endif %}</p>
 </section>
 {% endif %}
 {% endwith %}
