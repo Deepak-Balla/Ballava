@@ -34,7 +34,7 @@ Never put the secret key or the database password in GitHub, in a message, or an
 4. After some minutes your site is at `https://<name>.onrender.com`. Open it.
 5. Back in Supabase, **Authentication > URL Configuration:** Site URL `https://<name>.onrender.com`, and add the redirect URL `https://<name>.onrender.com/**`.
 
-Try it: create an account. Until step 4, Supabase's own sender only emails addresses in your Supabase team (2 an hour), so use the email you signed up to Supabase with.
+Try it: create an account. Until you set up emails (step 4), Supabase's own sender only emails addresses in your Supabase team (2 an hour), so use the email you signed up to Supabase with.
 
 ## 3. Your admin, and the data you already have (10 minutes)
 
@@ -67,7 +67,9 @@ People who already had a Ballava account sign in online with the **same email** 
 5. In Render > **Environment**, set `SITE_DOMAIN` to your domain (`ballava.com`). WhatsApp vote links use it from then on.
 6. In Supabase > Authentication > **URL Configuration**: Site URL `https://ballava.com`, and add the redirect URL `https://ballava.com/**`.
 
-**Emails for everyone** (needs the domain): make an account at [resend.com](https://resend.com), add the domain and copy the DNS records it shows into Cloudflare. Then in Supabase > Authentication > **Emails > SMTP Settings**: host `smtp.resend.com`, port `465`, user `resend`, password = a Resend API key, sender `hello@ballava.com`. Supabase then allows 30 emails an hour; raise it under *Rate Limits* when you need to.
+**Emails from "Ballava", to everyone, without a domain:** make a new Gmail address just for this, switch on 2-Step Verification, and create an app password at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). In Supabase > [SMTP settings](https://supabase.com/dashboard/project/_/auth/smtp): sender name `Ballava`, sender email and username = that Gmail address, host `smtp.gmail.com`, port `465`, password = the app password without spaces. Gmail allows about 500 emails a day. Set the subjects under Email Templates too.
+
+**Emails from your own address** (needs the domain): make an account at [resend.com](https://resend.com), add the domain and copy the DNS records it shows into Cloudflare. Then in Supabase > Authentication > **Emails > SMTP Settings**: host `smtp.resend.com`, port `465`, user `resend`, password = a Resend API key, sender `hello@ballava.com`. Supabase then allows 30 emails an hour; raise it under *Rate Limits* when you need to.
 
 ## 5. "Continue with Google" (10 minutes)
 
@@ -95,7 +97,7 @@ A free Render app sleeps after 15 minutes without visitors, and takes up to a mi
 | The deploy fails with `DATABASE_URL must look like...` or a password error | Use the **Session pooler** address, with your password filled in |
 | `Set DJANGO_SECRET_KEY` | Render > Environment: add `DJANGO_SECRET_KEY`, any 50+ random characters |
 | `SUPABASE_PUBLISHABLE_KEY holds a SECRET key` | The two keys are swapped. Make a new secret key in Supabase, since that one was in the wrong place |
-| "Emails can't be sent to this address yet" | Step 4, *Emails for everyone* |
+| "Emails can't be sent to this address yet" | Step 4, *Emails from "Ballava"* |
 | Google says `redirect_uri_mismatch` | The redirect URI in step 5 must match Supabase's exactly |
 | After Google you land on the wrong address | Supabase > URL Configuration: add your address with `/**` at the end |
 | "An account with this email already exists" | Supabase > Email provider: switch *Confirm email* on |
