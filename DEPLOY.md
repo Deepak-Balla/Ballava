@@ -18,8 +18,9 @@ You can stop after step 3 with a working website, and do the rest any day.
 1. Make an account at [supabase.com](https://supabase.com) and a **New project**. Region: **Southeast Asia (Singapore)**. Save the database password it gives you somewhere safe.
 2. **Turn the Data API off:** Integrations > Data API > *Enable Data API* off. Ballava doesn't use it. (Ballava also locks its own tables every time it starts, so this is a second lock on the same door.)
 3. Copy these into a private note. You need them in step 2:
-   - **Connect > Session pooler** (the one with port **5432** and `pooler` in the address). Put your password in place of `[YOUR-PASSWORD]`. This is `DATABASE_URL`. If the password has symbols like `@ / # :`, choose a new one with only letters and numbers.
-   - **Project Settings > API Keys:** the project URL (`SUPABASE_URL`), the **publishable** key (`SUPABASE_PUBLISHABLE_KEY`) and a **secret** key (`SUPABASE_SECRET_KEY`).
+   - **Connect** (top of the page) > the **Direct** tab > **Session pooler**: the address with port **5432** and `pooler` in it. [This link](https://supabase.com/dashboard/project/_?showConnect=true&connectTab=direct&method=session) opens it. Only see *Transaction pooler*? Copy that one and change `6543` to `5432`. Put your database password in its place in the address (forgot it? *Reset database password*, also under Connect). This is `DATABASE_URL`. If the password has symbols like `@ / # :`, choose a new one with only letters and numbers.
+   - **Connect** also shows the project URL, like `https://abcd.supabase.co` (`SUPABASE_URL`).
+   - **Settings > API Keys:** the **publishable** key (`SUPABASE_PUBLISHABLE_KEY`) and a **secret** key (`SUPABASE_SECRET_KEY`). Create them there if there are none yet.
 4. **Authentication > Sign In / Providers > Email:** *Confirm email* **on** (important: it's what stops anyone claiming someone else's address), minimum password length **8**.
 5. **Authentication > Emails > Templates:** replace *Confirm sign up* with [deploy/emails/confirm-signup.html](deploy/emails/confirm-signup.html) and *Reset password* with [deploy/emails/reset-password.html](deploy/emails/reset-password.html). They send a 6-digit code.
 
