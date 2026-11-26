@@ -22,7 +22,7 @@ You can stop after step 3 with a working website, and do the rest any day.
    - **Connect** also shows the project URL, like `https://abcd.supabase.co` (`SUPABASE_URL`).
    - **Settings > API Keys:** the **publishable** key (`SUPABASE_PUBLISHABLE_KEY`) and a **secret** key (`SUPABASE_SECRET_KEY`). Create them there if there are none yet.
 4. **Authentication > Sign In / Providers > Email:** *Confirm email* **on** (important: it's what stops anyone claiming someone else's address), minimum password length **8**.
-5. **Authentication > Emails > Templates:** replace *Confirm sign up* with [deploy/emails/confirm-signup.html](deploy/emails/confirm-signup.html) and *Reset password* with [deploy/emails/reset-password.html](deploy/emails/reset-password.html). They send a 6-digit code.
+5. **Authentication > Emails > Templates:** replace *Confirm sign up* with [deploy/emails/confirm-signup.html](deploy/emails/confirm-signup.html) and *Reset password* with [deploy/emails/reset-password.html](deploy/emails/reset-password.html). They send a 6-digit code. They only take effect once you use your own email sender (step 4): [since June 2026](https://supabase.com/changelog/46599-changes-to-email-template-customisation-on-free-tier), new free projects on Supabase's own sender send its standard email, with a link instead of a code. Ballava works with both.
 
 Never put the secret key or the database password in GitHub, in a message, or anywhere but Render's settings.
 
@@ -69,7 +69,7 @@ People who already had a Ballava account sign in online with the **same email** 
 
 **Emails from "Ballava", to everyone, without a domain:** make a new Gmail address just for this, switch on 2-Step Verification, and create an app password at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). In Supabase > [SMTP settings](https://supabase.com/dashboard/project/_/auth/smtp): sender name `Ballava`, sender email and username = that Gmail address, host `smtp.gmail.com`, port `465`, password = the app password without spaces. Gmail allows about 500 emails a day. Set the subjects under Email Templates too.
 
-**Emails from your own address** (needs the domain): make an account at [resend.com](https://resend.com), add the domain and copy the DNS records it shows into Cloudflare. Then in Supabase > Authentication > **Emails > SMTP Settings**: host `smtp.resend.com`, port `465`, user `resend`, password = a Resend API key, sender `hello@ballava.com`. Supabase then allows 30 emails an hour; raise it under *Rate Limits* when you need to.
+**Emails from your own address** (needs the domain): make an account at [resend.com](https://resend.com), add the domain and copy the DNS records it shows into Cloudflare. Then in Supabase > Authentication > **Emails > SMTP Settings**: host `smtp.resend.com`, port `465`, user `resend`, password = a Resend API key, sender `hello@ballava.com`. Supabase then allows 30 emails an hour; raise it under *Rate Limits* when you need to. **Then paste the two email templates (step 1) again**: they work from now on.
 
 ## 5. "Continue with Google" (10 minutes)
 

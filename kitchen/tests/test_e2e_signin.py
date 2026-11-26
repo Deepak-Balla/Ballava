@@ -52,13 +52,13 @@ def test_create_an_account_with_a_code_from_the_email(device, site, auth):
     p.get_by_role('alert').get_by_text(re.compile('Please agree')).wait_for()
     p.get_by_role('checkbox').check()
     p.get_by_role('button', name='Create account').last.click()
-    p.get_by_text('We sent a code to asha@example.com').wait_for()
+    p.get_by_text('We sent an email to asha@example.com').wait_for()
     snap(p, '20-login-code')
     p.get_by_label('Code from the email').fill('000000')
     p.get_by_role('button', name='Confirm and continue').click()
     p.get_by_role('alert').get_by_text(re.compile('not right, or it has expired')).wait_for()
-    p.get_by_role('button', name='Send a new code').click()
-    p.get_by_text('A new code is on its way').wait_for()
+    p.get_by_role('button', name='Send the email again').click()
+    p.get_by_text('A new email is on its way').wait_for()
     p.get_by_label('Code from the email').fill(CODE)
     p.get_by_role('button', name='Confirm and continue').click()
     home(p)
@@ -102,7 +102,7 @@ def test_forgotten_password(device, site, auth):
     p.get_by_role('button', name='Forgot your password?').click()
     p.get_by_label('Email').fill('asha@example.com')
     p.get_by_role('button', name='Email me a code').click()
-    p.get_by_text('If asha@example.com has an account').wait_for()
+    p.get_by_text('If asha@example.com has an account, an email is on its way').wait_for()
     p.get_by_label('Code from the email').fill(CODE)
     p.get_by_label('New password').fill('new-masala-43')
     p.get_by_role('button', name='Set new password').click()
@@ -153,6 +153,18 @@ def test_links_from_emails_and_stolen_codes(device, site, auth):
     p.get_by_role('alert').get_by_text('Please sign in again from this browser.').wait_for()
     p.goto(site + '?error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid')
     p.get_by_role('alert').get_by_text(re.compile('expired or was already used')).wait_for()
+    p.context.close()
+
+
+def test_the_link_in_a_standard_sign_up_email(device, site, auth):
+    new = auth.add('link@example.com', name='Link')
+    p = device()
+    p.goto(f"{site}#access_token={auth.token(new)}&type=signup&expires_in=3600")
+    p.get_by_role('heading', name='Welcome to Ballava!').wait_for()
+    assert 'access_token' not in p.url
+    p.get_by_role('checkbox').check()
+    p.get_by_role('button', name='Agree and continue').click()
+    p.get_by_role('navigation', name='Main').wait_for()
     p.context.close()
 
 

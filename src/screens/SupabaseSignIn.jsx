@@ -47,7 +47,7 @@ export default function SupabaseSignIn({ config, mode, setMode, onDone, Consent 
     run(async () => {
       const email = form.email.trim().toLowerCase();
       if (stage === 'consent') return enter(token, true);
-      if (stage === 'forgot') { await sendReset(config, email); return go('reset', `If ${email} has an account, a code is on its way. Check spam too.`); }
+      if (stage === 'forgot') { await sendReset(config, email); return go('reset', `If ${email} has an account, an email is on its way. Tap its link, or type its code here. Check spam too.`); }
       if (stage === 'code') return enter(await checkCode(config, { email, token: form.code, type: 'signup' }), true);
       if (stage === 'reset') { // the code works once, so keep what it gave us even if the new password is refused
         const t = await checkCode(config, { email, token: form.code, type: 'recovery' });
@@ -61,12 +61,12 @@ export default function SupabaseSignIn({ config, mode, setMode, onDone, Consent 
       if (mode === 'signup') {
         if (!consent) throw new Error("Please agree to how Ballava stores your family's food and health details.");
         const t = await signUp(config, { email, password: form.password, name: form.name.trim() });
-        return t ? enter(t, true) : go('code', `We sent a code to ${email}. Check spam too.`);
+        return t ? enter(t, true) : go('code', `We sent an email to ${email}. Tap the link in it, or type its code here. Check spam too.`);
       }
       try { return await enter(await signIn(config, { email, password: form.password })); } catch (err) {
         if (err.code !== 'email_not_confirmed') throw err;
         await resendCode(config, email);
-        return go('code', `Your email isn't confirmed yet. We sent a new code to ${email}.`);
+        return go('code', `Your email isn't confirmed yet. We sent a new email to ${email}: tap its link, or type its code here.`);
       }
     });
   };
@@ -107,7 +107,7 @@ export default function SupabaseSignIn({ config, mode, setMode, onDone, Consent 
       {stage === 'form' && mode === 'signin' && <button type="button" className="btn link center-btn" onClick={() => go('forgot')}>Forgot your password?</button>}
       {stage === 'code' && (
         <>
-          <button type="button" className="btn link center-btn" disabled={busy} onClick={() => run(async () => { await resendCode(config, form.email.trim().toLowerCase()); setInfo('A new code is on its way.'); })}>Send a new code</button>
+          <button type="button" className="btn link center-btn" disabled={busy} onClick={() => run(async () => { await resendCode(config, form.email.trim().toLowerCase()); setInfo('A new email is on its way.'); })}>Send the email again</button>
           <p className="muted small center">No email? If you already have an account, nothing is sent. Sign in, or reset your password, instead.</p>
         </>
       )}
