@@ -1,8 +1,10 @@
 """The admin portal at /admin, built on Django's admin.
 
 What admins can do: add and edit recipes (draft -> review -> publish, with safety checks), hide recipes,
-add ingredients and Bachao fixes, post announcements, keep the festival calendar, and disable users.
-What admins cannot see: any family's kitchen, members, diets, health goals or meal diary.
+add ingredients and Bachao fixes, post announcements, keep the festival calendar, answer support requests
+sent from the app, and disable users.
+What admins cannot see: any family's kitchen, members, diets, health goals or meal diary. (A support request
+holds only what the person chose to write in it.)
 """
 import json
 from collections import Counter
@@ -15,18 +17,20 @@ from django.contrib import admin, messages
 from django.contrib.admin.models import ADDITION, CHANGE, LogEntry
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import Group, User
-from django.db.models import Count, Sum
+from django.db.models import Case, Count, OuterRef, Subquery, Sum, When
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpResponse, HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
-from django.utils.html import format_html
+from django.utils.formats import date_format
+from django.utils.html import format_html, format_html_join
 from django.utils import timezone
 
 from . import ai, api, catalog, engine, recipe_editor
 from .data.ingredients import CATEGORIES
 from .data.recipes import RECIPES
-from .models import AiUsage, Announcement, FamilyData, Festival, HiddenRecipe, Household, Housekeeping, Ingredient, Recipe, Rescue
+from .models import (AiUsage, Announcement, FamilyData, Festival, HiddenRecipe, Household, Housekeeping, Ingredient, Recipe, Rescue,
+                     SupportMessage, SupportRequest)
 from .security import ApiError, clear_limit, client_ip, limited
 
 BUILT_IN = {r['id']: r for r in RECIPES}
@@ -55,6 +59,28 @@ def publish_recipe(site, request, recipe):
     LogEntry.objects.log_actions(request.user.pk, [recipe], CHANGE, change_message='Published', single_object=True)
     messages.success(request, format_html('{} is published. Users see it now.', link))
     return True
+
+
+# ---------------------------------------------------------------- support requests that need the team
+def last_from_team():
+    """For each support request: True when the newest message is the team's, False when the person wrote last."""
+    return Subquery(SupportMessage.objects.filter(ticket=OuterRef('pk')).order_by('-created_at', '-pk').values('from_team')[:1])
+
+
+def needs_reply():
+    """Support requests waiting for the team: not resolved, and the person wrote last."""
+    return SupportRequest.objects.exclude(status=SupportRequest.RESOLVED).annotate(team_last=last_from_team()).filter(team_last=False)
+
+
+def mask_contact(user):
+    """An email or phone with most of it hidden, enough to tell people apart."""
+    contact = user.email or getattr(getattr(user, 'profile', None), 'phone', None)
+    if not contact:
+        return '-'
+    if '@' in contact:
+        name, domain = contact.split('@', 1)
+        return f'{name[0]}***@{domain}'
+    return f'{contact[:3]}******{contact[-2:]}'
 
 
 # ---------------------------------------------------------------- the recipe book (every recipe, in one place)
@@ -111,6 +137,14 @@ class BallavaAdminSite(admin.AdminSite):
             clear_limit(key)
         return response
 
+    def each_context(self, request):
+        """On every admin page: how many support requests wait for a reply (shown on the section bar)."""
+        context = super().each_context(request)
+        user = request.user
+        if user.is_active and user.is_staff and (user.has_perm('kitchen.view_supportrequest') or user.has_perm('kitchen.change_supportrequest')):
+            context['ballava_support_waiting'] = needs_reply().count()
+        return context
+
     def get_urls(self):
         return [
             path('recipe-book/', self.admin_view(self.recipe_book), name='recipe_book'),
@@ -126,6 +160,9 @@ class BallavaAdminSite(admin.AdminSite):
         month_ago = today - timedelta(days=29)
         meals = sum(len(v) for v in FamilyData.objects.filter(key='history').values_list('value', flat=True) if isinstance(v, list))
         review = list(Recipe.objects.filter(status=Recipe.REVIEW)[:8])
+        waiting = needs_reply().select_related('user')
+        support = list(waiting.order_by('updated_at')[:6])  # the longest-waiting first
+        support_n = waiting.count()
         stats = [
             ('👥', 'Users', User.objects.filter(is_staff=False).count(), ''),
             ('🟢', 'Active in 7 days', User.objects.filter(is_staff=False, profile__last_seen__gte=week_ago).count(), ''),
@@ -134,6 +171,7 @@ class BallavaAdminSite(admin.AdminSite):
             ('📖', 'Built-in recipes', len(RECIPES), ''),
             ('✏️', 'Custom recipes live', Recipe.objects.exclude(live=None).count(), ''),
             ('⏳', 'Waiting for review', Recipe.objects.filter(status=Recipe.REVIEW).count(), 'warn' if review else ''),
+            ('🙋', 'Support: needs a reply', support_n, 'warn' if support_n else ''),
             ('✨', 'AI calls, 30 days', AiUsage.objects.filter(day__gte=month_ago).aggregate(n=Sum('calls'))['n'] or 0, ''),
         ]
         drafts = [(r, recipe_editor.problems_of(r.to_raw())) for r in Recipe.objects.filter(status=Recipe.DRAFT).order_by('-updated_at')[:6]]
@@ -154,6 +192,7 @@ class BallavaAdminSite(admin.AdminSite):
         hour = timezone.localtime().hour
         return super().index(request, {
             'ballava_stats': stats, 'ballava_review': review, 'ballava_drafts': drafts, 'ballava_book': book,
+            'ballava_support': support, 'ballava_support_more': max(0, support_n - len(support)),
             'ballava_recent': LogEntry.objects.select_related('user', 'content_type').order_by('-action_time')[:8],
             'ballava_ai_days': [(d.strftime('%a'), calls.get(d, 0), round(calls.get(d, 0) / top * 100)) for d in days],
             'ballava_ai_limit': settings.AI_RATE_LIMIT,
@@ -542,10 +581,113 @@ class FestivalAdmin(admin.ModelAdmin):
             self.message_user(request, f'Users will see {obj.name} within a minute. Where: {self.users_see(obj)}.')
 
 
+# ---------------------------------------------------------------- help & support
+class SupportReplyForm(forms.ModelForm):
+    reply = forms.CharField(label='Your reply', required=False, max_length=2000,
+                            widget=forms.Textarea(attrs={'rows': 6, 'cols': 80, 'placeholder': 'Write to them in plain, friendly words…'}),
+                            help_text='They see it in the app under More → Help & support, signed "Ballava team".')
+
+    class Meta:
+        model = SupportRequest
+        fields = ['status']
+
+
+@admin.register(SupportRequest, site=admin_site)
+class SupportRequestAdmin(admin.ModelAdmin):
+    """Problems and questions sent from the app. Read the conversation, reply, and mark it resolved."""
+    form = SupportReplyForm
+    list_display = ['number', 'subject', 'person', 'category', 'status_badge', 'reply_badge', 'updated_at']
+    list_display_links = ['number', 'subject']
+    list_filter = ['status', 'category']
+    search_fields = ['subject', 'messages__text', 'user__first_name', 'user__email', 'user__profile__phone']
+    readonly_fields = ['subject', 'person', 'category', 'created_at', 'device', 'conversation']
+    fieldsets = [
+        (None, {'fields': ['subject', 'person', 'category', 'created_at', 'device']}),
+        ('Conversation', {'fields': ['conversation']}),
+        ('Answer', {'fields': ['reply', 'status'],
+                    'description': 'Replying moves an open request to In progress. Choose Resolved when the problem is fixed. '
+                                   'If they write again, it opens again by itself.'}),
+    ]
+    actions = ['mark_in_progress', 'mark_resolved']
+
+    def get_queryset(self, request):
+        """Waiting for a reply first, then the rest that are open, then resolved; the latest first within each."""
+        qs = super().get_queryset(request).select_related('user', 'user__profile').annotate(team_last=last_from_team())
+        rank = Case(When(status=SupportRequest.RESOLVED, then=2), When(team_last=False, then=0), default=1)
+        return qs.annotate(rank=rank).order_by('rank', '-updated_at')
+
+    def has_add_permission(self, request):
+        return False  # people send them from the app
+
+    # ---- the list
+    @admin.display(description='#', ordering='pk')
+    def number(self, obj):
+        return f'#{obj.pk}'
+
+    @admin.display(description='From', ordering='user__first_name')
+    def person(self, obj):
+        return format_html('<a href="{}">{}</a> <span class="b-muted">{}</span>', reverse('admin:auth_user_change', args=[obj.user_id]),
+                           obj.user.first_name or obj.user.username, mask_contact(obj.user))
+
+    @admin.display(description='Status', ordering='status')
+    def status_badge(self, obj):
+        return format_html('<span class="b-badge support-{}">{}</span>', obj.status, obj.get_status_display())
+
+    @admin.display(description='Reply')
+    def reply_badge(self, obj):
+        if obj.status == SupportRequest.RESOLVED:
+            return '-'
+        if getattr(obj, 'team_last', None):
+            return format_html('<span class="b-muted">{}</span>', 'Answered, waiting for them')
+        return format_html('<span class="b-badge review">{}</span>', 'Needs a reply')
+
+    # ---- one request
+    @admin.display(description='Messages')
+    def conversation(self, obj):
+        if not obj or not obj.pk:
+            return '-'
+
+        def who(m):
+            if not m.from_team:
+                return obj.user.first_name or 'They'
+            name = (m.author.first_name or m.author.username) if m.author else 'An admin'
+            return f'{name} (Ballava team)'
+        rows = format_html_join('', '<div class="b-msg {}"><div class="b-msg-head"><b>{}</b><span>{}</span></div><div class="b-msg-text">{}</div></div>', (
+            ('team' if m.from_team else 'them', who(m), date_format(timezone.localtime(m.created_at), 'j M Y, H:i'), m.text)
+            for m in obj.messages.select_related('author')))
+        return format_html('<div class="b-thread">{}</div>', rows)
+
+    def save_model(self, request, obj, form, change):
+        reply = form.cleaned_data.get('reply') or ''
+        if reply and obj.status == SupportRequest.OPEN:
+            obj.status = SupportRequest.IN_PROGRESS
+        obj.resolved_at = (obj.resolved_at or timezone.now()) if obj.status == SupportRequest.RESOLVED else None
+        super().save_model(request, obj, form, change)
+        if reply:
+            SupportMessage.objects.create(ticket=obj, from_team=True, author=request.user, text=reply)
+            self.message_user(request, f'Reply sent. {obj.user.first_name or "They"} will see it in the app under Help & support.', messages.SUCCESS)
+
+    def _set_status(self, request, queryset, status):
+        now = timezone.now()
+        ids = list(queryset.values_list('pk', flat=True))
+        n = SupportRequest.objects.filter(pk__in=ids).exclude(status=status).update(
+            status=status, resolved_at=now if status == SupportRequest.RESOLVED else None, updated_at=now)
+        label = dict(SupportRequest.STATUS)[status].lower()
+        self.message_user(request, f'{n} support request(s) marked {label}.', messages.SUCCESS)
+
+    @admin.action(description='Mark as resolved', permissions=['change'])
+    def mark_resolved(self, request, queryset):
+        self._set_status(request, queryset, SupportRequest.RESOLVED)
+
+    @admin.action(description='Mark as in progress', permissions=['change'])
+    def mark_in_progress(self, request, queryset):
+        self._set_status(request, queryset, SupportRequest.IN_PROGRESS)
+
+
 # ---------------------------------------------------------------- people
 class FamilyUserAdmin(UserAdmin):
     """Accounts only. Family data (kitchen, diets, health goals, diary) is never shown here."""
-    list_display = ['first_name', 'masked_contact', 'family_size', 'date_joined', 'last_seen', 'is_active', 'is_staff']
+    list_display = ['first_name', 'masked_contact', 'family_size', 'support_requests', 'date_joined', 'last_seen', 'is_active', 'is_staff']
     list_filter = ['is_active', 'is_staff']
     search_fields = ['first_name', 'email', 'profile__phone']
     fieldsets = [
@@ -557,18 +699,21 @@ class FamilyUserAdmin(UserAdmin):
     ]
 
     def get_queryset(self, request):
+        still_open = (SupportRequest.objects.filter(user=OuterRef('pk')).exclude(status=SupportRequest.RESOLVED)
+                      .values('user').annotate(n=Count('pk')).values('n'))
         return super().get_queryset(request).select_related('profile', 'profile__household').annotate(
-            family_n=Count('profile__household__people'))
+            family_n=Count('profile__household__people'), support_n=Subquery(still_open))
 
     @admin.display(description='Contact')
     def masked_contact(self, obj):
-        contact = obj.email or getattr(getattr(obj, 'profile', None), 'phone', None)
-        if not contact:
+        return mask_contact(obj)
+
+    @admin.display(description='Support', ordering='support_n')
+    def support_requests(self, obj):
+        if not obj.support_n:
             return '-'
-        if '@' in contact:
-            user, domain = contact.split('@', 1)
-            return f'{user[0]}***@{domain}'
-        return f'{contact[:3]}******{contact[-2:]}'
+        url = reverse('admin:kitchen_supportrequest_changelist') + '?' + urlencode({'user__id__exact': obj.pk})
+        return format_html('<a href="{}">{} open</a>', url, obj.support_n)
 
     @admin.display(description='Family size', ordering='family_n')
     def family_size(self, obj):

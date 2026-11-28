@@ -18,13 +18,14 @@ from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import F, Q
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 
 from . import ai, assistant, catalog, engine, planner, retention, supabase
-from .models import AiUsage, ChatThread, FamilyData, Household, Poll, Profile, Vote
+from .models import AiUsage, ChatThread, FamilyData, Household, Poll, Profile, SupportMessage, SupportRequest, Vote
 from .security import ApiError, auth_config, check_code, clear_limit, client_ip, limited, request_code
 
 log = logging.getLogger('kitchen')
@@ -257,7 +258,7 @@ def me(request, body):
     if not user:
         return {'user': None}
     Profile.objects.filter(pk=user.profile.pk).update(last_seen=timezone.now())
-    return {'user': public_user(user), 'household': household_info(user)}
+    return {'user': public_user(user), 'household': household_info(user), 'supportUnread': support_unread(user)}
 
 
 # ---------------------------------------------------------------- family data
@@ -334,7 +335,8 @@ def export_account(request, body):
     user = require_user(request)
     polls = list(Poll.objects.filter(household=user.profile.household).values('title', 'date', 'slot', 'options'))
     return {'exportedAt': timezone.now().isoformat(), 'account': public_user(user), 'household': household_info(user),
-            'data': read_state(user)['items'], 'polls': polls, 'chats': [chat_json(t) for t in user.chats.all()]}
+            'data': read_state(user)['items'], 'polls': polls, 'chats': [chat_json(t) for t in user.chats.all()],
+            'support': [support_json(t) for t in user.support_requests.prefetch_related('messages')]}
 
 
 @endpoint()
@@ -350,6 +352,100 @@ def delete_account(request, body):
         if orphan:
             orphan.delete()
     supabase.delete_person(supabase_id)
+    return {'ok': True}
+
+
+# ---------------------------------------------------------------- Help & support: problems and questions for the team
+# Private to the person who sent them (not shared with the family). Admins answer them in the admin portal.
+SUPPORT_SUBJECT, SUPPORT_TEXT = 100, 2000
+
+
+def support_json(ticket):
+    msgs = list(ticket.messages.all())
+    seen = ticket.user_seen_at
+    return {
+        'id': ticket.pk, 'category': ticket.category, 'categoryLabel': ticket.get_category_display(), 'subject': ticket.subject,
+        'status': ticket.status, 'statusLabel': ticket.get_status_display(),
+        'createdAt': ticket.created_at.isoformat(), 'updatedAt': ticket.updated_at.isoformat(),
+        'unread': any(m.from_team and (not seen or m.created_at > seen) for m in msgs),
+        'messages': [{'fromTeam': m.from_team, 'text': m.text, 'at': m.created_at.isoformat()} for m in msgs],
+    }
+
+
+def support_unread(user):
+    """How many of their requests have a reply from the team they haven't opened yet."""
+    return (SupportMessage.objects.filter(ticket__user=user, from_team=True)
+            .filter(Q(ticket__user_seen_at__isnull=True) | Q(created_at__gt=F('ticket__user_seen_at')))
+            .values('ticket').distinct().count())
+
+
+def support_text(value, most, empty_error):
+    text = str(value or '').strip()
+    if not text:
+        raise ApiError(400, empty_error)
+    if len(text) > most:
+        raise ApiError(400, f'Please keep it under {most} characters.')
+    return text
+
+
+def own_ticket(user, number):
+    ticket = SupportRequest.objects.filter(pk=number, user=user).first()
+    if not ticket:
+        raise ApiError(404, 'That support request was not found.')
+    return ticket
+
+
+@endpoint(methods=('GET', 'POST'))
+def support(request, body):
+    """GET: your support requests, newest first. POST {category, subject, message}: send a new one to the team."""
+    user = require_user(request)
+    if request.method == 'GET':
+        tickets = user.support_requests.prefetch_related('messages').order_by('-updated_at')
+        return {'requests': [support_json(t) for t in tickets]}
+    subject = support_text(body.get('subject'), SUPPORT_SUBJECT, 'Please say in a few words what it is about.')
+    message = support_text(body.get('message'), SUPPORT_TEXT, 'Please tell the team what happened.')
+    category = body.get('category') if body.get('category') in dict(SupportRequest.CATEGORIES) else 'other'
+    if limited(f'support:{user.pk}', 10, 86400):
+        raise ApiError(429, "You've sent a lot of requests today. Please add to one you already sent, or try again tomorrow.")
+    with transaction.atomic():
+        ticket = SupportRequest.objects.create(user=user, category=category, subject=subject, user_seen_at=timezone.now(),
+                                               device=request.headers.get('User-Agent', '')[:300])
+        SupportMessage.objects.create(ticket=ticket, author=user, text=message)
+    return {'request': support_json(ticket)}
+
+
+@endpoint()
+def support_reply(request, body, number):
+    """Add to your request. Writing again on a resolved one opens it again."""
+    user = require_user(request)
+    ticket = own_ticket(user, number)
+    text = support_text(body.get('text'), SUPPORT_TEXT, 'Please write your message.')
+    if limited(f'support-reply:{user.pk}', 60, 3600):
+        raise ApiError(429, 'Too many messages. Please wait a little and try again.')
+    with transaction.atomic():
+        SupportMessage.objects.create(ticket=ticket, author=user, text=text)
+        if ticket.status == SupportRequest.RESOLVED:
+            ticket.status, ticket.resolved_at = SupportRequest.OPEN, None
+        ticket.user_seen_at = timezone.now()
+        ticket.save()
+    return {'request': support_json(ticket)}
+
+
+@endpoint()
+def support_resolve(request, body, number):
+    """The person says their problem is solved."""
+    ticket = own_ticket(require_user(request), number)
+    if ticket.status != SupportRequest.RESOLVED:
+        ticket.status, ticket.resolved_at = SupportRequest.RESOLVED, timezone.now()
+        ticket.save()
+    return {'request': support_json(ticket)}
+
+
+@endpoint()
+def support_read(request, body, number):
+    """They opened it, so the team's replies are no longer new. (Doesn't move it up the list.)"""
+    ticket = own_ticket(require_user(request), number)
+    SupportRequest.objects.filter(pk=ticket.pk).update(user_seen_at=timezone.now())
     return {'ok': True}
 
 

@@ -25,14 +25,19 @@
   <a href="{% url 'admin:ingredient_book' %}">🥕 Ingredients &amp; calories</a>
   <a href="{% url 'admin:kitchen_announcement_add' %}">📣 Post an announcement</a>
   <a href="{% url 'admin:kitchen_festival_add' %}">🎉 Add a festival</a>
+  <a href="{% url 'admin:kitchen_supportrequest_changelist' %}">🙋 Support requests</a>
   <a href="{% url 'admin:admin_logentry_changelist' %}">🧾 Audit log</a>
 </div>
 
 <div class="b-grid">
   <section class="b-card">
     <h3>⚠️ Needs your attention</h3>
-    {% if ballava_review or ballava_drafts %}
+    {% if ballava_support or ballava_review or ballava_drafts %}
     <ul>
+      {% for s in ballava_support %}
+      <li><span><a href="{% url 'admin:kitchen_supportrequest_change' s.pk %}">#{{ s.pk }} {{ s.subject|truncatechars:50 }}</a><br><span class="b-muted">{% firstof s.user.first_name s.user.username %} · {{ s.get_category_display }} · waiting {{ s.updated_at|timesince }}</span></span><span class="b-badge review">Needs a reply</span></li>
+      {% endfor %}
+      {% if ballava_support_more %}<li><a href="{% url 'admin:kitchen_supportrequest_changelist' %}">…and {{ ballava_support_more }} more support request{{ ballava_support_more|pluralize }}</a></li>{% endif %}
       {% for r in ballava_review %}
       <li><a href="{% url 'admin:kitchen_recipe_change' r.pk %}">{{ r.name }}</a><span class="b-badge review">Waiting for review</span></li>
       {% endfor %}
@@ -41,7 +46,7 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p class="b-empty">All clear. Nothing is waiting for review.</p>
+    <p class="b-empty">All clear. No recipes wait for review, and no support requests wait for a reply.</p>
     {% endif %}
   </section>
 

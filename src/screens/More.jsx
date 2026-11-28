@@ -3,23 +3,24 @@ import { Header } from '../ui.jsx';
 import { go } from '../lib.js';
 import { t, LANGS } from '../i18n.js';
 
-export default function More({ prefs, setPrefs, auth, members, savedDishes }) {
+export default function More({ prefs, setPrefs, auth, members, savedDishes, supportUnread = 0 }) {
   const links = [
     ['settings', '⚙️', t('Settings'), 'Theme, colour, text size, voice, Chef and more'],
     ['saved', '❤️', 'Saved dishes', savedDishes.length ? `${savedDishes.length} saved` : 'Tap ♡ on any dish to keep it here'],
     ['family', '👪', t('Family'), members.length ? `${members.length} added` : 'Diets, allergies and goals'],
     ['bachao', '🛟', 'Bachao!', 'Rescue a dish that went wrong'],
     ['ai', '✨', 'Recipe Studio', 'Get any recipe by name, invent one, or scan your fridge'],
+    ['support', '🙋', 'Help & support', supportUnread ? `${supportUnread} new ${supportUnread === 1 ? 'reply' : 'replies'} from the team` : 'Report a problem or ask the Ballava team', supportUnread],
     ['account', '👤', t('Account'), auth.user ? auth.user.name : 'Sign in to share with family'],
   ];
   return (
     <div className="screen">
       <Header title={t('More')} />
       <div className="menu">
-        {links.map(([id, icon, label, hint]) => (
-          <button key={id} className="menu-item" onClick={() => go(id)} aria-label={label}>
+        {links.map(([id, icon, label, hint, badge]) => (
+          <button key={id} className="menu-item" onClick={() => go(id)} aria-label={badge ? `${label}, ${hint}` : label}>
             <span className="menu-icon" aria-hidden="true">{icon}</span>
-            <span><b>{label}</b><span className="muted small">{hint}</span></span>
+            <span><b>{label}{badge ? <span className="pill warn">New</span> : null}</b><span className="muted small">{hint}</span></span>
             <span className="muted" aria-hidden="true">›</span>
           </button>
         ))}

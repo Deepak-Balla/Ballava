@@ -2,6 +2,7 @@
 {% url 'admin:index' as home_url %}{% url 'admin:recipe_book' as book_url %}{% url 'admin:ingredient_book' as ing_url %}
 {% url 'admin:kitchen_recipe_changelist' as edits_url %}{% url 'admin:kitchen_announcement_changelist' as news_url %}
 {% url 'admin:kitchen_festival_changelist' as fest_url %}{% url 'admin:auth_user_changelist' as users_url %}
+{% url 'admin:kitchen_supportrequest_changelist' as help_url %}
 <nav class="ballava-nav" aria-label="Ballava sections">
   <a href="{{ home_url }}"{% if request.path == home_url %} class="on" aria-current="page"{% endif %}>🏠 Dashboard</a>
   <a href="{{ book_url }}"{% if book_url in request.path %} class="on" aria-current="page"{% endif %}>📖 Recipe book</a>
@@ -9,6 +10,7 @@
   <a href="{{ edits_url }}"{% if edits_url in request.path %} class="on" aria-current="page"{% endif %}>✏️ New &amp; edited recipes</a>
   <a href="{{ news_url }}"{% if news_url in request.path %} class="on" aria-current="page"{% endif %}>📣 Announcements</a>
   <a href="{{ fest_url }}"{% if fest_url in request.path %} class="on" aria-current="page"{% endif %}>🎉 Festivals</a>
+  <a href="{{ help_url }}"{% if help_url in request.path %} class="on" aria-current="page"{% endif %}>🙋 Support{% if ballava_support_waiting %} <span class="b-count" title="Waiting for a reply">{{ ballava_support_waiting }}</span>{% endif %}</a>
   <a href="{{ users_url }}"{% if users_url in request.path %} class="on" aria-current="page"{% endif %}>👥 Users</a>
 </nav>
 {% endif %}

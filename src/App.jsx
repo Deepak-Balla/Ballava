@@ -19,6 +19,7 @@ import Login from './screens/Login.jsx';
 import Vote from './screens/Vote.jsx';
 import Saved from './screens/Saved.jsx';
 import Settings from './screens/Settings.jsx';
+import Support from './screens/Support.jsx';
 import Assistant from './Assistant.jsx';
 import { applyLook } from './look.js';
 import { hasReturned } from './supabase.js';
@@ -43,6 +44,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [aiStatus, setAiStatus] = useState({ checked: false, ai: false, server: false });
   const [auth, setAuth] = useState({ checked: false, user: null, household: null });
+  const [supportUnread, setSupportUnread] = useState(0); // replies from the Ballava team not opened yet
   const [guest, setGuest] = useState(() => isGuest() && !hasReturned());
 
   setLang(prefs.lang);
@@ -75,6 +77,7 @@ export default function App() {
   const loadMe = useCallback(async ({ merge = false, rejoined = false } = {}) => {
     const me = await api('me');
     setAuth({ checked: true, user: me.user, household: me.household || null });
+    setSupportUnread(me.supportUnread || 0);
     if (!me.user) return;
     if (rejoined) await rejoin(sessionLost);
     else await startSync({ merge, onLost: sessionLost });
@@ -143,6 +146,14 @@ export default function App() {
 
   useEffect(() => {
     try { if (auth.user) localStorage.setItem('ballava._user', JSON.stringify(auth.user)); } catch { /* ignore */ }
+  }, [auth.user]);
+
+  // A reply from the Ballava team shows as a red dot on More, even when the app stays open.
+  useEffect(() => {
+    if (!auth.user) return undefined;
+    const check = () => api('me').then(me => { if (me.user) setSupportUnread(me.supportUnread || 0); }).catch(() => {});
+    window.addEventListener('focus', check);
+    return () => window.removeEventListener('focus', check);
   }, [auth.user]);
 
   // Latest rating per recipe: Ballava learns your "andaaz" (taste) from this.
@@ -231,7 +242,7 @@ export default function App() {
   const ctx = {
     pantry, setPantry, addToPantry, members, setMembers, shopping, setShopping, addToShopping, history, setHistory, log, logMeal, ratings, aiRecipes, setAiRecipes,
     filters, setFilters, notify, aiStatus, findRecipe, plan, setPlan, pins, setPins, prefs, setPrefs, catalog, family, fasts, fastsLoading: fastInfo.loading, auth, loadMe, signedOut,
-    savedDishes, isSaved, toggleSave, openAssistant: () => setChatOpen(true), refreshAi,
+    savedDishes, isSaved, toggleSave, openAssistant: () => setChatOpen(true), refreshAi, supportUnread, setSupportUnread,
   };
 
   let body;
@@ -249,6 +260,7 @@ export default function App() {
     case 'saved': body = <Saved {...ctx} />; break;
     case 'settings': body = <Settings {...ctx} />; break;
     case 'account': body = <Account {...ctx} />; break;
+    case 'support': body = <Support {...ctx} param={param} />; break;
     default: body = <Home {...ctx} />; // also #/ask, the old chat address: Home with the AI window open
   }
 
@@ -258,7 +270,7 @@ export default function App() {
     ['dashboard', 'Dashboard', '📊'], ['home', 'Cook', '🍳'], ['plan', 'Plan', '🗓️'], ['chef', 'Chef', '🧑‍🍳'], ['pantry', 'Kitchen', '🧺'],
     ['list', 'List', '🛒'], ['more', 'More', '☰'],
   ];
-  const moreScreens = ['more', 'family', 'bachao', 'account', 'saved', 'settings'];
+  const moreScreens = ['more', 'family', 'bachao', 'account', 'saved', 'settings', 'support'];
   const active = id => (id === 'more' ? moreScreens.includes(screen)
     : id === 'dashboard' ? ['dashboard', 'track'].includes(screen)
       : screen === id || (id === 'home' && !['plan', 'track', 'dashboard', 'pantry', 'list', ...moreScreens].includes(screen)));
@@ -280,10 +292,12 @@ export default function App() {
               <span>{label}</span>
             </button>
           ) : (
-            <button key={id} className={active(id) && !chatOpen ? 'active' : ''} onClick={() => { setChatOpen(false); go(id); }} aria-label={t(label)}>
+            <button key={id} className={active(id) && !chatOpen ? 'active' : ''} onClick={() => { setChatOpen(false); go(id); }}
+              aria-label={t(label) + (id === 'more' && supportUnread > 0 ? `, ${supportUnread} new ${supportUnread === 1 ? 'reply' : 'replies'} from the Ballava team` : '')}>
               <span className="tab-icon" aria-hidden="true">{icon}</span>
               <span>{t(label)}</span>
               {id === 'list' && listCount > 0 && <span className="badge">{listCount}</span>}
+              {id === 'more' && supportUnread > 0 && <span className="badge">{supportUnread}</span>}
             </button>
           )))}
         </nav>

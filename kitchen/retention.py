@@ -5,6 +5,7 @@ What goes after 6 months:
 - each saved (hearted) dish, 6 months after it was saved (saving it again starts the clock again)
 - each AI recipe, 6 months after it was made, unless it's still saved
 - each chat with Ballava Chef, 6 months after its last message
+- each support request, 6 months after it was resolved (open ones stay until the team answers them)
 - family votes, AI usage counts and sign-in attempt records
 - whole accounts nobody has used for 6 months, with their family's data when nobody else in the family is active
 
@@ -25,7 +26,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from . import supabase
-from .models import AiUsage, Attempt, ChatThread, FamilyData, Household, Housekeeping, Poll
+from .models import AiUsage, Attempt, ChatThread, FamilyData, Household, Housekeeping, Poll, SupportRequest
 
 log = logging.getLogger('kitchen')
 DATED_KEYS = ('history', 'savedDishes', 'aiRecipes')
@@ -70,7 +71,7 @@ def cleanup(now=None):
     if not days():
         return {}
     when, day, ms = cutoff(now)
-    done = {'accounts': 0, 'families': 0, 'meals': 0, 'savedDishes': 0, 'aiRecipes': 0, 'chats': 0, 'votes': 0}
+    done = {'accounts': 0, 'families': 0, 'meals': 0, 'savedDishes': 0, 'aiRecipes': 0, 'chats': 0, 'votes': 0, 'supportRequests': 0}
 
     # Accounts nobody has used for 6 months (never admins). Their family goes too if nobody else in it is active.
     stale = User.objects.filter(is_staff=False, profile__isnull=False).exclude(profile__last_seen__gte=when).filter(date_joined__lt=when)
@@ -103,6 +104,8 @@ def cleanup(now=None):
 
     done['chats'] = ChatThread.objects.filter(at__lt=ms).delete()[0]
     done['votes'] = Poll.objects.filter(created_at__lt=when).delete()[0]
+    old_support = SupportRequest.objects.filter(status=SupportRequest.RESOLVED, updated_at__lt=when)
+    done['supportRequests'] = old_support.delete()[1].get('kitchen.SupportRequest', 0)  # not counting their messages
     AiUsage.objects.filter(day__lt=when.date()).delete()
     Attempt.objects.filter(at__lt=when).delete()
     log.info('Removed data older than %s days: %s', days(), done)

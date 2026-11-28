@@ -17,7 +17,8 @@ Ballava is a web app that runs in any browser and installs on a phone like a nor
 - **Bachao!** mode rescues dishes (too salty, burnt, split kadhi…) and says honestly when food isn't safe
 - **family accounts**: one shared kitchen, plan and list across phones, by family code
 - **real sign-in** with Supabase when you put it online: email codes, password reset and Google (see DEPLOY.md)
-- **admin portal** at `/admin` for recipes, ingredients, Bachao fixes, announcements and festivals
+- **Help & support**: anyone signed in can report a problem or ask a question (More, Help & support); admins answer it in the admin portal and the reply shows in the app
+- **admin portal** at `/admin` for recipes, ingredients, Bachao fixes, announcements, festivals and support requests
 - optional AI (needs an AI key): **Ballava Chef**, a chat for any recipe by name, calories and swaps, and **Recipe Studio**, which gets or invents a recipe and reads a photo of your fridge
 
 **The app is written in Python (Django).** Only the phone screens are JavaScript (React), because browsers can only run JavaScript.
@@ -107,6 +108,7 @@ What the admin portal does:
 - **Adding a recipe:** click **➕ Add a recipe** and choose how to start: **✨ Write it for me** (AI fills in everything from the dish's name), **📋 Paste a recipe** (from WhatsApp, a website or your notes; works without AI too), **📖 Copy a recipe**, or type it yourself. Pick ingredients by any name (tamatar, pyaz, kandi pappu) or type a whole line like "2 cups toor dal"; write "for 5 minutes" or "3 whistles" in a step and the timer is added. Calories, diet, allergens and anything left to fix show beside the form as you type. If an ingredient isn't in the list, add it right there. Then press **🚀 Publish**, or **💾 Save draft** to finish later.
 - **Changing a recipe:** open it in the Recipe book and click **Edit**. Users keep seeing the last published version until you publish again. Recipes that break the safety rules (for example "gluten-free" with atta, or meat without a food-safety note) can't be published. The owner (a superuser) publishes in one click; other admins press **Send to review**, and it's published after that.
 - **Hidden recipes**, **Ingredients**, **Rescues** (Bachao fixes), **Announcements**, **Festivals**: changes reach users within a minute, even if they have the app open. A festival shows on the Plan tab, and on the Dashboard from 30 days before. Tick **Fasting day** and families get fasting dishes for it (they can say they don't keep it). A festival whose date has passed is not shown (the list says so).
+- **Support requests:** problems and questions people send from the app (More, Help & support). **🙋 Support** on the section bar shows how many wait for a reply, and so does the Dashboard. Open one to read the conversation, write **Your reply**, and set the **Status** (Open, In progress, Resolved); replying moves an open request to In progress. The person sees the reply in the app, signed "Ballava team", with a red dot on More. If they write again on a resolved request, it opens again. The **Users** list shows who has requests open. Requests are private to the person (their family doesn't see them), go when their account is deleted, and are removed 6 months after they're resolved.
 - **Audit log:** every change, with who made it and when.
 - **Privacy:** admins see accounts only. Family kitchens, diets, health goals and meal diaries are never shown in the portal.
 
@@ -118,14 +120,14 @@ After 5 wrong admin passwords, that login is locked for 15 minutes.
 .venv\Scripts\python -m pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest
 ```
-This runs **270 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `270 passed`. The tests never call a real AI or use your keys.
+This runs **284 checks** in about two minutes: the recipe book has no typos, a vegetarian never sees chicken, a week has 21 different meals, families can't see each other's data, admins can't see family health details, wrong passwords get locked out, and much more. You should see `284 passed`. The tests never call a real AI or use your keys.
 
 **Real-browser checks (about a minute):**
 ```
 .venv\Scripts\python -m playwright install chromium
 .venv\Scripts\python -m pytest -m e2e
 ```
-This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, share the plan and vote from the WhatsApp link, see a festival an admin just added, fast for a day, and paste, check and publish a recipe as an admin. It also tries hands-free cooking with a pretend microphone, a fridge photo with a pretend AI, planning a day with Chef, changing a planned meal, the settings (dark theme, colour, text size) and the computer layout. Screenshots go to `test-screenshots/`. You should see `61 passed`.
+This opens a hidden Chrome on a phone-sized screen and uses the whole app like a family would: sign up, plan the week, cook with the whistle counter, log meals, join a family on a second phone, edit offline, share the plan and vote from the WhatsApp link, see a festival an admin just added, fast for a day, paste, check and publish a recipe as an admin, and send a support request that an admin answers. It also tries hands-free cooking with a pretend microphone, a fridge photo with a pretend AI, planning a day with Chef, changing a planned meal, the settings (dark theme, colour, text size) and the computer layout. Screenshots go to `test-screenshots/`. You should see `65 passed`.
 
 > The tests switch AI **off** on purpose (so they never use your key or your free limit). That's why the test screenshots say "AI is off"; your own app is not affected.
 

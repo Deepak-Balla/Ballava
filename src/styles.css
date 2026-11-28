@@ -296,6 +296,14 @@ code { background: var(--accent-soft); padding: 1px 5px; border-radius: 5px; fon
 .bubble.me { background: var(--accent); color: #fff; justify-self: end; }
 .bubble .chips { margin-top: 8px; }
 .chat-form { margin-top: 10px; }
+/* Help & support */
+.support-list { margin-top: 14px; }
+.support-list b { overflow-wrap: anywhere; }
+.support-tags { display: grid; justify-items: end; }
+.support-tags .pill, .menu-item b .pill { margin: 2px 0 0 6px; vertical-align: 1px; }
+.support-thread .bubble { overflow-wrap: anywhere; }
+.bubble-from { display: block; font-size: .8rem; color: var(--accent-dark); margin-bottom: 2px; }
+.bubble.me .bubble-note { color: rgba(255, 255, 255, .85); }
 .invite-code { font: 700 1.5rem/1 ui-monospace, monospace; letter-spacing: .15em; background: var(--bg); border-radius: 10px; padding: 14px; text-align: center; margin: 10px 0; }
 .vote-option { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 54px; padding: 10px 14px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--card); font-weight: 600; cursor: pointer; }
 .vote-option.on { border-color: var(--accent); background: var(--accent-soft); }

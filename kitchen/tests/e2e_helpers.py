@@ -14,6 +14,15 @@ DESKTOP = {'viewport': {'width': 1200, 'height': 800}}
 EXPECTED_NOISE = re.compile(r'status of 4\d\d|ERR_FAILED|ERR_INTERNET_DISCONNECTED')
 
 
+def _real_db_name():
+    """The database the app itself uses (read before any test database is made), which these tests must never flush."""
+    from django.conf import settings
+    return str(settings.DATABASES['default']['NAME'])
+
+
+REAL_DB = _real_db_name()
+
+
 @pytest.fixture(scope='module')
 def site(django_db_setup, django_db_blocker):
     """The real app, served by Django on a random port, using the test database.
@@ -35,9 +44,17 @@ def site(django_db_setup, django_db_blocker):
             pass
 
     from django.core.management import call_command
-    from django.db import connections
+    from django.db import connection, connections
+    from django.test.utils import setup_databases, teardown_databases
 
     with django_db_blocker.unblock():
+        # pytest-django only makes a test database when some test is marked as using one. With `pytest -m e2e` alone,
+        # none is, so the connection would still be the real database. Make the test database here instead.
+        own = None
+        if str(connection.settings_dict['NAME']) == REAL_DB:
+            own = setup_databases(verbosity=0, interactive=False, aliases={'default'}, serialized_aliases=set())
+        if str(connection.settings_dict['NAME']) == REAL_DB:
+            raise RuntimeError(f'Refusing to run the browser tests on the real database ({REAL_DB}).')
         call_command('flush', interactive=False, verbosity=0)  # every test file starts from an empty database
         httpd = make_server('localhost', 0, StaticFilesHandler(get_wsgi_application()), server_class=Server, handler_class=Quiet)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -45,6 +62,8 @@ def site(django_db_setup, django_db_blocker):
         httpd.shutdown()
         httpd.server_close()
         connections.close_all()
+        if own:
+            teardown_databases(own, verbosity=0)
 
 
 @pytest.fixture(scope='module')

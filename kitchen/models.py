@@ -235,6 +235,45 @@ class Festival(models.Model):
         return f'{self.name} ({self.date})'
 
 
+# ---------------------------------------------------------------- help & support
+class SupportRequest(models.Model):
+    """A problem or question someone sent to the Ballava team from the app (More, Help & support).
+    Only that person and admins see it: not their family. Admins answer it in the admin portal.
+    Deleted with their account, and 6 months after it was resolved."""
+    OPEN, IN_PROGRESS, RESOLVED = 'open', 'in_progress', 'resolved'
+    STATUS = [(OPEN, 'Open'), (IN_PROGRESS, 'In progress'), (RESOLVED, 'Resolved')]
+    CATEGORIES = [('problem', "Something isn't working"), ('account', 'Sign-in or account'),
+                  ('recipe', 'A recipe or ingredient is wrong'), ('idea', 'Idea or suggestion'), ('other', 'Something else')]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='support_requests')
+    category = models.CharField('About', max_length=10, choices=CATEGORIES, default='problem')
+    subject = models.CharField(max_length=100)
+    status = models.CharField(max_length=12, choices=STATUS, default=OPEN, db_index=True)
+    device = models.CharField('Browser', max_length=300, blank=True, help_text='The browser it was sent from, to help find the problem.')
+    created_at = models.DateTimeField('Sent', auto_now_add=True)
+    updated_at = models.DateTimeField('Last update', auto_now=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    user_seen_at = models.DateTimeField(null=True, blank=True, editable=False)  # replies after this are "new" for them
+
+    class Meta:
+        verbose_name = 'support request'
+
+    def __str__(self):
+        return f'#{self.pk} {self.subject}'
+
+
+class SupportMessage(models.Model):
+    """One message in a support request: from the person who sent it, or a reply from the team."""
+    ticket = models.ForeignKey(SupportRequest, on_delete=models.CASCADE, related_name='messages')
+    from_team = models.BooleanField(default=False)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    text = models.TextField(max_length=2000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at', 'pk']
+
+
 class Housekeeping(models.Model):
     """When a regular clean-up job last ran, and what it did (shown on the admin dashboard)."""
     name = models.CharField(max_length=40, primary_key=True)

@@ -70,8 +70,8 @@ export default function Account({ auth, loadMe, signedOut, notify }) {
 
       <div className="card form">
         <h3>Your data</h3>
-        <p className="small">Everything you do is saved in your account: your kitchen, family, plan, food diary, saved dishes, calorie goal and chats with Chef. Sign in on any phone or computer and it's all there.</p>
-        <p className="muted small">🧹 Kept for 6 months: meals in the diary, saved dishes, AI recipes and chats are deleted 6 months after their date, and an account nobody signs in to for 6 months is deleted with its data. Your kitchen, family and plan stay while you use Ballava.</p>
+        <p className="small">Everything you do is saved in your account: your kitchen, family, plan, food diary, saved dishes, calorie goal, chats with Chef and your support requests. Sign in on any phone or computer and it's all there.</p>
+        <p className="muted small">🧹 Kept for 6 months: meals in the diary, saved dishes, AI recipes and chats are deleted 6 months after their date, and support requests 6 months after they're resolved. An account nobody signs in to for 6 months is deleted with its data. Your kitchen, family and plan stay while you use Ballava.</p>
         <button className="btn ghost" disabled={busy} onClick={() => run(async () => download(await api('account/export')))}>Download my data</button>
         <details>
           <summary className="danger">Delete my account</summary>
